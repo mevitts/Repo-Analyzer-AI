@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 fastapi
 uvicorn[standard]
 
@@ -9,16 +8,4 @@ python-dotenv
 
 requests
 arrow
-=======
-fastapi
-uvicorn[standard]
-
-google-adk
-google-cloud-secret-manager
-google-generativeai
-python-dotenv
-
-requests
-arrow
->>>>>>> 89f974fa8c9c5ebca981103561fb77154912bc04
 bleach
