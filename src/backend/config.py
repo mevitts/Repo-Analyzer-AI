@@ -6,10 +6,12 @@ load_dotenv()
 PROJECT_ID = "cedar-router-466020-s9"
 GOOGLE_API_KEY = None
 GITHUB_TOKEN = None
+FRONTEND_API_KEY = None
 
 try:
     from src.backend.tools import get_secret
     GOOGLE_API_KEY = get_secret("GOOGLE_API_KEY", PROJECT_ID)
+    FRONTEND_API_KEY = get_secret("FRONTEND_API_KEY", PROJECT_ID)
     print("Using Google API key from Secret Manager")
 except Exception as e:
     print(f"Could not access Secret Manager: {e}")

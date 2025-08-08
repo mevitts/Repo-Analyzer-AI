@@ -5,7 +5,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "vite",
-    "build": "vite build"
+    "build": "echo VITE_FRONTEND_API_KEY=$_FRONTEND_API_KEY > .env && vite build"
   },
   "keywords": [],
   "author": "",

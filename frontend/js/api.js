@@ -11,6 +11,7 @@ export class APIService {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                'X-API-KEY': import.meta.env.VITE_FRONTEND_API_KEY
             },
             body: JSON.stringify({ owner, repo })
         });

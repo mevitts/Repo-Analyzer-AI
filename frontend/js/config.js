@@ -1,5 +1,6 @@
 
 export const CONFIG = {
+    FRONTEND_API_KEY: '', // Replace with your actual API key
     API_BASE_URL: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
         ? 'http://localhost:8888' 
         : 'https://repo-analyzer-ai-66124000276.us-east5.run.app',

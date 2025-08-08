@@ -1,12 +1,21 @@
 import asyncio
 import uuid
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import APIKeyHeader
 import google.genai as genai
-from src.backend.config import GOOGLE_API_KEY, CORS_ORIGINS
+from src.backend.config import GOOGLE_API_KEY, CORS_ORIGINS, FRONTEND_API_KEY
 from src.backend.models import RepoInput
 from src.backend.services import AnalysisService
 from google.genai.types import Content, Part
+
+API_KEY_NAME = "X-API-KEY"
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+
+async def get_api_key(api_key: str = Depends(api_key_header)):
+    if not api_key or api_key != FRONTEND_API_KEY:
+        raise HTTPException(status_code=403, detail="Invalid API Key")
+    return api_key
 
 genai.Client(api_key=GOOGLE_API_KEY)
 
@@ -32,7 +41,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     except WebSocketDisconnect:
         analysis_service.remove_websocket_connection(session_id)
 
-@app.post("/analyze")
+@app.post("/analyze", dependencies=[Depends(get_api_key)])
 async def analyze_repository(data: RepoInput):
     return await analysis_service.analyze_repository(data.owner, data.repo)
 
