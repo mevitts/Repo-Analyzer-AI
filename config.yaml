@@ -1,0 +1,25 @@
+# Local/Dev Configuration Example
+
+# This file is for development/testing only. Production config is handled by Google Cloud env vars.
+
+logging:
+  level: INFO
+  file: logs/dev.log
+
+knowledge_graph:
+  enabled: true
+  builder_module: src/backend/graph_builder.py
+
+file_selection:
+  include_patterns:
+    - '**/*.py'
+    - '**/*.js'
+  exclude_patterns:
+    - 'tests/**'
+    - 'venv/**'
+
+vector_db:
+  type: faiss
+  index_file: resources/faiss_index.bin
+
+# Add more parameters as needed for local/dev overrides.

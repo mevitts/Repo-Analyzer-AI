@@ -21,18 +21,47 @@ try:
 except Exception as e:
     print(f"Error accessing secrets: {e}")
     print("Falling back to environment variables...")
+    
 
+#filters through
+def list_files(repo: str, owner: str,
+    exclude_folders: Optional[Set[str]] = None,
+    exclude_extensions: Optional[Set[str]] = None,
+    include_files: Optional[Set[str]] = None
+) -> dict:
 
-def list_files(repo: str, owner: str) -> dict:
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+
+
+    if exclude_folders is None:
+        exclude_folders = {'node_modules', '__pycache__', 'dist', 'build', 'out', 'target', 'vendor'}
+    if exclude_extensions is None:
+        exclude_extensions = {'.png', '.jpg', '.gif', '.ico', '.exe', '.dll', '.class', '.o', '.so'}
+    if include_files is None:
+        include_files = {'README.md', 'CONTRIBUTING.md', 'CHANGELOG.md',
+                         'Dockerfile', 'docker-compose.yml', '.env',
+                         'package.json', 'package-lock.json',
+                         'requirements.txt', 'Pipfile', 'setup.py', 'pyproject.toml',
+                         'pom.xml', 'build.gradle', 'Gemfile', 'Gemfile.lock',
+                         'Cargo.toml'}
+
     try:
         response = requests.get(f"https://api.github.com/repos/{owner}/{repo}/git/trees/main?recursive=1", headers=headers)
         response.raise_for_status()
         tree = response.json().get('tree', [])
         files = [item['path'] for item in tree if item['type'] == 'blob']
+
+        context_files = {item['path'] for item in tree if item['path'] in include_files}
+        files = [file for file in files if not any(folder in file.split('/') for folder in exclude_folders)]
+        files = [file for file in files if not any(file.endswith(ext) for ext in exclude_extensions)]
+
+        files = list(set(files) | context_files)
+
         return {"status": "success", "files": files}
+
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
 
 def get_file_contents(repo: str, file_path: str, owner: str) -> dict:
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
@@ -45,10 +74,12 @@ def get_file_contents(repo: str, file_path: str, owner: str) -> dict:
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+
 def save_selected_files(files: list[str], tool_context: ToolContext) -> dict:
     tool_context.state["selected_files_list"] = files
     tool_context.state["all_file_contents"] = {}
     return {"status": "success", "files_saved": len(files)}
+
 
 def fetch_all_content(tool_context: ToolContext) -> dict:
     try:

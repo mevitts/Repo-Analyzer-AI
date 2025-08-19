@@ -4,14 +4,6 @@ from src.backend.tools import get_file_contents, save_selected_files, fetch_all_
 
 MODEL_GEMINI_2_0_FLASH = "gemini-2.0-flash-lite-001"
 
-file_selector_agent = Agent(
-    model=MODEL_GEMINI_2_0_FLASH,
-    name="File_Selector",
-    description="This agent selects the most relevant files from a repository.",
-    instruction=PROMPT_FILE_SELECTOR,
-    tools=[list_files, get_file_contents, save_selected_files]
-)
-
 content_fetcher_agent = Agent(
     model=MODEL_GEMINI_2_0_FLASH,
     name="Content_Fetcher",
