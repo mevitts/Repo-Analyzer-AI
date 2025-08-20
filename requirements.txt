@@ -5,6 +5,9 @@ google-adk
 google-cloud-secret-manager
 google-generativeai
 python-dotenv
+astchunk
+networkx
+qdrant-client
 
 requests
 arrow

@@ -3,6 +3,8 @@ import requests
 import base64
 from google.adk.tools import ToolContext
 from google.cloud import secretmanager
+from src.backend.chunking_utils import chunk_repo
+from src.backend.embed_utils import embed_and_store_chunks
 
 def get_secret(secret_id: str, project_id: str) -> str:
     client = secretmanager.SecretManagerServiceClient()
@@ -31,7 +33,6 @@ def list_files(repo: str, owner: str,
 ) -> dict:
 
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
-
 
     if exclude_folders is None:
         exclude_folders = {'node_modules', '__pycache__', 'dist', 'build', 'out', 'target', 'vendor'}
@@ -86,16 +87,25 @@ def fetch_all_content(tool_context: ToolContext) -> dict:
         owner = tool_context.state.get("owner")
         repo = tool_context.state.get("repo")
         files_to_read = tool_context.state.get("selected_files_list", [])
+
         if not owner or not repo:
             return {"status": "error", "message": "Owner or repo not found in state."}
+
         all_content = {}
         print(f"Tool: Fetching content for {len(files_to_read)} files...")
+
         for path in files_to_read:
             result = get_file_contents(repo=repo, file_path=path, owner=owner)
             all_content[path] = result.get("content", f"Error: {result.get('message')}")
+
         tool_context.state["all_file_contents"] = all_content
         print("Tool: Finished fetching all file contents.")
+
         return {"status": "success", "files_fetched": len(all_content)}
+
     except Exception as e:
         print(f"FATAL ERROR in fetch_all_content tool: {e}")
         return {"status": "error", "message": f"A fatal error occurred: {e}"}
+
+
+def process_and_store_chunks(tool_context: ToolContext):

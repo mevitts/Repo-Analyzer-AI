@@ -3,14 +3,6 @@ from astchunk import ASTChunkBuilder
 from enum import Enum, auto
 from .language_enums import Language
 
-'''
-class Language(Enum):
-    PYTHON = "python"
-    JAVA = "java"
-    TYPESCRIPT = "typescript"
-    CSHARP = "csharp"
-    '''
-
 LANGUAGE_CONFIGS = {
     Language.PYTHON: {
         "max_chunk_size": 850,
