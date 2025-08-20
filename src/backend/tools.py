@@ -5,15 +5,14 @@ from google.adk.tools import ToolContext
 from google.cloud import secretmanager
 from src.backend.chunking_utils import chunk_repo
 from src.backend.embed_utils import embed_and_store_chunks
+from .config import GITHUB_TOKEN, PROJECT_ID
+
 
 def get_secret(secret_id: str, project_id: str) -> str:
     client = secretmanager.SecretManagerServiceClient()
     name = f"projects/{project_id}/secrets/{secret_id}/versions/latest"
     response = client.access_secret_version(name=name)
     return response.payload.data.decode("UTF-8")
-
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-PROJECT_ID = "cedar-router-466020-s9"
 
 try:
     github_token = get_secret("GITHUB_TOKEN", PROJECT_ID)
@@ -107,5 +106,3 @@ def fetch_all_content(tool_context: ToolContext) -> dict:
         print(f"FATAL ERROR in fetch_all_content tool: {e}")
         return {"status": "error", "message": f"A fatal error occurred: {e}"}
 
-
-def process_and_store_chunks(tool_context: ToolContext):

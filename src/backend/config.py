@@ -5,7 +5,7 @@ load_dotenv()
 
 PROJECT_ID = "cedar-router-466020-s9"
 GOOGLE_API_KEY = None
-GITHUB_TOKEN = None
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 FRONTEND_API_KEY = None
 
 try:
@@ -32,3 +32,41 @@ CORS_ORIGINS = [
 ]
 
 APP_NAME = "Repo_Analysis" 
+
+
+LANGUAGE_CONFIGS = {
+    Language.PYTHON: {
+        "max_chunk_size": 850,
+        "language": Language.PYTHON.value,
+        "metadata_template": "default",
+        "chunk_expansion": True,
+        "chunk_overlap": 2,
+    },
+    Language.JAVA: {
+        "max_chunk_size": 1000,
+        "language": Language.JAVA.value,
+        "metadata_template": "default",
+        "chunk_expansion": True,
+        "chunk_overlap": 2,
+    },
+    Language.TYPESCRIPT: {
+        "max_chunk_size": 900,
+        "language": Language.TYPESCRIPT.value,
+        "metadata_template": "default",
+        "chunk_expansion": True,
+        "chunk_overlap": 2,
+    },
+    Language.CSHARP: {
+        "max_chunk_size": 900,
+        "language": Language.CSHARP.value,
+        "metadata_template": "default",
+        "chunk_expansion": True,
+        "chunk_overlap": 2,
+    }
+}
+
+JINA_API_URL = 'https://api.jina.ai/v1/embeddings'
+JINA_HEADERS = {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer jina_0ca89f52b6494763b09d4c006e91718cwDeN3kUByO9ZmKtLHlf4KFp96RBc' #example token
+}

@@ -2,37 +2,7 @@ import os
 from astchunk import ASTChunkBuilder
 from enum import Enum, auto
 from .language_enums import Language
-
-LANGUAGE_CONFIGS = {
-    Language.PYTHON: {
-        "max_chunk_size": 850,
-        "language": Language.PYTHON.value,
-        "metadata_template": "default",
-        "chunk_expansion": True,
-        "chunk_overlap": 2,
-    },
-    Language.JAVA: {
-        "max_chunk_size": 1000,
-        "language": Language.JAVA.value,
-        "metadata_template": "default",
-        "chunk_expansion": True,
-        "chunk_overlap": 2,
-    },
-    Language.TYPESCRIPT: {
-        "max_chunk_size": 900,
-        "language": Language.TYPESCRIPT.value,
-        "metadata_template": "default",
-        "chunk_expansion": True,
-        "chunk_overlap": 2,
-    },
-    Language.CSHARP: {
-        "max_chunk_size": 900,
-        "language": Language.CSHARP.value,
-        "metadata_template": "default",
-        "chunk_expansion": True,
-        "chunk_overlap": 2,
-    }
-}
+from .config import LANGUAGE_CONFIGS
 
 def get_language_from_path(file_path):
     ext = os.path.splitext(file_path)[1].lower()

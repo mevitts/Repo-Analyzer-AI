@@ -5,6 +5,7 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from src.backend.agents import root_agent
 
+
 class AnalysisService:
     def __init__(self):
         self.runner = Runner(

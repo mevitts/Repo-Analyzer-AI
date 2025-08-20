@@ -1,0 +1,55 @@
+import requests
+from qdrant_client.models import PointStruct
+from src.backend.qdrant_client import qdrant_client
+import uuid
+from .config import JINA_API_URL, JINA_HEADERS
+
+
+class JinaEmbedder:
+    def __init__(self, api_key, model='jina-embeddings-v3'):
+        self.api_url = JINA_API_URL
+        self.headers = {**JINA_HEADERS}
+        self.model = model
+
+    def embed_chunks(self, chunk_list):
+        """
+        Given a list of chunks, call the jina-embeddings-v3 API to embed each chunk
+        """
+        input_text = [chunk['content'] for chunk in chunk_list]
+        data = {
+            "model": self.model,
+            "task": "text-matching",
+            "input": input_text
+        }
+
+        response = requests.post(self.api_url, headers=self.headers, json=data)
+        response.raise_for_status()
+
+        vecs_with_metadata = []
+        for i, emb_data in enumerate(response.json()["data"]):
+            vector = emb_data["embedding"]
+            metadata = chunk_list[i]["metadata"]
+            vecs_with_metadata.append((vector, metadata))
+        
+        return vecs_with_metadata
+
+
+    def upsert_embeddings(self, qdrant_client, collection_name, repo_id, vecs_with_metadata):
+        """
+        Upsert embeddings into Qdrant with repo_id as a filterable field.
+        """
+        points = []
+        for vector, metadata in vecs_with_metadata:
+            metadata["repo_id"] = repo_id
+            points.append(
+                PointStruct(
+                    id=str(uuid.uuid4()),
+                    vector=vector,
+                    payload=metadata
+                )
+            )
+
+        qdrant_client.upsert(
+            collection_name=collection_name,
+            points=points
+        )
