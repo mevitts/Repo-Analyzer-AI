@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+from .language_enums import Language
 
 load_dotenv()
 
@@ -8,6 +9,7 @@ GOOGLE_API_KEY = None
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 FRONTEND_API_KEY = None
 
+'''
 try:
     from src.backend.tools import get_secret
     GOOGLE_API_KEY = get_secret("GOOGLE_API_KEY", PROJECT_ID)
@@ -18,6 +20,7 @@ except Exception as e:
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
     if not GOOGLE_API_KEY:
         raise ValueError("GOOGLE_API_KEY not found in .env file or Secret Manager.")
+'''
 
 CORS_ORIGINS = [
     "http://localhost:3000",
@@ -68,5 +71,4 @@ LANGUAGE_CONFIGS = {
 JINA_API_URL = 'https://api.jina.ai/v1/embeddings'
 JINA_HEADERS = {
     'Content-Type': 'application/json',
-    'Authorization': 'Bearer jina_0ca89f52b6494763b09d4c006e91718cwDeN3kUByO9ZmKtLHlf4KFp96RBc' #example token
-}
+    }

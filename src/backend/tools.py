@@ -1,10 +1,10 @@
 import os
 import requests
 import base64
+from typing import Optional, Set
 from google.adk.tools import ToolContext
 from google.cloud import secretmanager
-from src.backend.chunking_utils import chunk_repo
-from src.backend.embed_utils import embed_and_store_chunks
+from src.backend.utils.chunking_utils import chunk_repo
 from .config import GITHUB_TOKEN, PROJECT_ID
 
 

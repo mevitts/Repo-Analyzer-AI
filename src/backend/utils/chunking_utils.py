@@ -1,8 +1,8 @@
 import os
 from astchunk import ASTChunkBuilder
 from enum import Enum, auto
-from .language_enums import Language
-from .config import LANGUAGE_CONFIGS
+from src.backend.language_enums import Language
+from src.backend.config import LANGUAGE_CONFIGS
 
 def get_language_from_path(file_path):
     ext = os.path.splitext(file_path)[1].lower()

@@ -1,14 +1,13 @@
 import requests
 from qdrant_client.models import PointStruct
-from src.backend.qdrant_client import qdrant_client
 import uuid
-from .config import JINA_API_URL, JINA_HEADERS
+from src.backend.config import JINA_API_URL, JINA_HEADERS
 
 
 class JinaEmbedder:
     def __init__(self, api_key, model='jina-embeddings-v3'):
         self.api_url = JINA_API_URL
-        self.headers = {**JINA_HEADERS}
+        self.headers = {**JINA_HEADERS, "Authorization": f"Bearer {api_key}"}
         self.model = model
 
     def embed_chunks(self, chunk_list):
@@ -32,6 +31,22 @@ class JinaEmbedder:
             vecs_with_metadata.append((vector, metadata))
         
         return vecs_with_metadata
+
+
+    def embed_query(self, query: str):
+        """
+        Embed a query using the jina-embeddings-v3 API.
+        """
+        data = {
+            "model": self.model,
+            "task": "text-matching",
+            "input": [query]
+        }
+
+        response = requests.post(self.api_url, headers=self.headers, json=data)
+        response.raise_for_status()
+
+        return response.json()["data"][0]["embedding"]
 
 
     def upsert_embeddings(self, qdrant_client, collection_name, repo_id, vecs_with_metadata):

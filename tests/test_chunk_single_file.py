@@ -1,5 +1,5 @@
 import pytest
-from src.backend.chunking_utils import chunk_file
+from src.backend.utils.chunking_utils import chunk_file
 from src.backend.language_enums import Language
 
 TEST_FILE = 'C:/Users/MattEvitts/Repos/Repo-Analyzer-AI/src/backend/main.py'
@@ -16,5 +16,5 @@ def test_chunk_single_file():
     print(f"Chunk count: {len(chunks)}")
     for i, chunk in enumerate(chunks, 1):
         print(f"\n--- Chunk {i} ---\n{chunk}\n")
-        print(chunk.)
+        print(chunk)
     assert len(chunks) > 0, "No chunks returned!"

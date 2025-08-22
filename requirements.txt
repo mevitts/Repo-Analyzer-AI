@@ -1,14 +1,26 @@
-fastapi
-uvicorn[standard]
+# Core API dependencies
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
 
+# Google Cloud and AI dependencies
 google-adk
 google-cloud-secret-manager
 google-generativeai
+
+# Environment and configuration
 python-dotenv
+
+# Code analysis and chunking
 astchunk
 networkx
+
+# Vector database
 qdrant-client
 
+# HTTP requests and utilities
 requests
 arrow
 bleach
+
+# Type hints support
+typing-extensions
