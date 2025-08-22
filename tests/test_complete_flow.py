@@ -20,7 +20,9 @@ import os
 import time
 import requests
 from typing import Dict, Any
+from dotenv import load_dotenv
 
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -239,7 +241,7 @@ def run_complete_test():
     
     return True
 
-    def check_requirements():
+def check_requirements():
     """Check if required environment variables and dependencies are set"""
     logger.info("Checking requirements...")
     

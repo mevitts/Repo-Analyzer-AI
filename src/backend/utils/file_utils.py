@@ -2,11 +2,18 @@ import os
 import requests
 import base64
 from typing import Optional, Set
-from google.adk.tools import ToolContext
-from google.cloud import secretmanager
+import logging
+#from google.adk.tools import ToolContext
+#from google.cloud import secretmanager
 from src.backend.utils.chunking_utils import chunk_repo
-from .config import GITHUB_TOKEN, PROJECT_ID
+from src.backend.config import GITHUB_TOKEN, PROJECT_ID
 
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 def get_secret(secret_id: str, project_id: str) -> str:
     client = secretmanager.SecretManagerServiceClient()
@@ -16,13 +23,13 @@ def get_secret(secret_id: str, project_id: str) -> str:
 
 try:
     github_token = get_secret("GITHUB_TOKEN", PROJECT_ID)
-    google_api_key = get_secret("GOOGLE_API_KEY", PROJECT_ID)
+    #google_api_key = get_secret("GOOGLE_API_KEY", PROJECT_ID)
     GITHUB_TOKEN = github_token
-    print("Successfully accessed secrets from Google Cloud Secret Manager")
+    #print("Successfully accessed secrets from Google Cloud Secret Manager")
 except Exception as e:
     print(f"Error accessing secrets: {e}")
     print("Falling back to environment variables...")
-    
+    GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 
 #filters through
 def list_files(repo: str, owner: str,
@@ -45,14 +52,20 @@ def list_files(repo: str, owner: str,
                          'pom.xml', 'build.gradle', 'Gemfile', 'Gemfile.lock',
                          'Cargo.toml'}
 
+    logger.info(f"Successfully filtered files for repo {repo}")
     try:
         response = requests.get(f"https://api.github.com/repos/{owner}/{repo}/git/trees/main?recursive=1", headers=headers)
         response.raise_for_status()
+        logger.info(f"Successfully fetched file tree for repo {repo}")
+
         tree = response.json().get('tree', [])
         files = [item['path'] for item in tree if item['type'] == 'blob']
+        logger.info(f"Successfully extracted {len(files)} files from repo {repo}")
 
         context_files = {item['path'] for item in tree if item['path'] in include_files}
         files = [file for file in files if not any(folder in file.split('/') for folder in exclude_folders)]
+
+        logger.info(f"Successfully filtered files for repo {repo}")
         files = [file for file in files if not any(file.endswith(ext) for ext in exclude_extensions)]
 
         files = list(set(files) | context_files)
@@ -74,7 +87,7 @@ def get_file_contents(repo: str, file_path: str, owner: str) -> dict:
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-
+'''
 def save_selected_files(files: list[str], tool_context: ToolContext) -> dict:
     tool_context.state["selected_files_list"] = files
     tool_context.state["all_file_contents"] = {}
@@ -105,4 +118,4 @@ def fetch_all_content(tool_context: ToolContext) -> dict:
     except Exception as e:
         print(f"FATAL ERROR in fetch_all_content tool: {e}")
         return {"status": "error", "message": f"A fatal error occurred: {e}"}
-
+'''

@@ -2,19 +2,20 @@ from fastapi import APIRouter, Request
 import logging
 from src.backend.services.embedding_service import process_repo
 from src.backend.utils.embed_utils import JinaEmbedder
-from src.backend.tools import list_files, get_file_contents
+from src.backend.utils.file_utils import list_files, get_file_contents
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
 
 @router.post("/load_repo")
 async def load_repo(request: Request, repo_id: str, owner: str):
     """
     Endpoint to load a repository before processing its contents.
     """
+    logger.info(f"Loading repository {repo_id} for owner {owner}")
     file_list_resp = list_files(repo=repo_id, owner=owner)
+    logger.info(f"File list response: Completed")
     if file_list_resp["status"] != "success":
         return {"status": "error", "message": file_list_resp.get("message", "Failed to list files")}
     file_list = file_list_resp["files"]
