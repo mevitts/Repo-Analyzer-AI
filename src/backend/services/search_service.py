@@ -1,13 +1,20 @@
+from tkinter import N
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue, MatchText
+import logging
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 class SearchService:
     def __init__(self, qdrant: QdrantClient, embedder, repo_id: str):
         self.qdrant = qdrant
         self.embedder = embedder
         self.repo_id = repo_id
 
-    def semantic_search(self, query: str, repo_id: str = None, file_path: str = None, limit: int = 10):
+    def semantic_search(self, query: str, repo_id: str = None, file_path: str = None, n_max: int = 10):
         """
         Perform a semantic search on the repo with optional strict filtering.
         - If query is provided: use embedding search.
@@ -22,15 +29,18 @@ class SearchService:
                 collection_name=collection_name,
                 query=query_embedding,
                 query_filter=filter_obj,
-                limit=limit
+                limit=n_max,
+                with_vectors=True
             )
         else:
             results = self.qdrant.scroll(
                 collection_name=collection_name,
                 scroll_filter=filter_obj,
                 with_payload=True,
-                limit=limit
+                limit=n_max,
+                with_vectors=True
             )
+        logger.info(f"Raw Qdrant search result: {results}")
 
         return results
 
@@ -52,3 +62,22 @@ class SearchService:
             return Filter(must=musts)
         else:
             return None
+
+
+    def fetch_all_points(self, repo_id: str = None, n_max: int = 3000):
+        """
+        Fetch all points from the Qdrant collection for a specific repo.
+        """
+        filter_obj = self.build_filter(repo_id=repo_id)
+        collection_name = f'repo_{repo_id or self.repo_id}'
+
+        results = self.qdrant.scroll(
+            collection_name=collection_name,
+            scroll_filter=filter_obj,
+            with_payload=True,
+            with_vectors=True,
+            limit=n_max
+        )
+        logger.info(f"Raw Qdrant fetch all points result: {results}")
+
+        return results

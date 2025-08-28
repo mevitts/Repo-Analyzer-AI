@@ -8,13 +8,16 @@ import logging
 from src.backend.utils.chunking_utils import chunk_repo
 from src.backend.config import GITHUB_TOKEN, PROJECT_ID
 
+import sys
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+if not logger.hasHandlers():
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    logger.addHandler(handler)
 
+'''
 def get_secret(secret_id: str, project_id: str) -> str:
     client = secretmanager.SecretManagerServiceClient()
     name = f"projects/{project_id}/secrets/{secret_id}/versions/latest"
@@ -30,6 +33,7 @@ except Exception as e:
     print(f"Error accessing secrets: {e}")
     print("Falling back to environment variables...")
     GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+'''
 
 #filters through
 def list_files(repo: str, owner: str,

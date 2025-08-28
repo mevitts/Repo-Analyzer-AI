@@ -14,32 +14,39 @@ async def load_repo(request: Request, repo_id: str, owner: str):
     Endpoint to load a repository before processing its contents.
     """
     logger.info(f"Loading repository {repo_id} for owner {owner}")
-    file_list_resp = list_files(repo=repo_id, owner=owner)
-    logger.info(f"File list response: Completed")
-    if file_list_resp["status"] != "success":
-        return {"status": "error", "message": file_list_resp.get("message", "Failed to list files")}
-    file_list = file_list_resp["files"]
+    try:
+        file_list_resp = list_files(repo=repo_id, owner=owner)
+        logger.info(f"File list response: Completed")
+        if file_list_resp["status"] != "success":
+            logger.error(f"Failed to list files: {file_list_resp.get('message')}")
+            return {"status": "error", "message": file_list_resp.get("message", "Failed to list files")}
+        file_list = file_list_resp["files"]
 
-    all_content = {}
-    for path in file_list:
-        result = get_file_contents(repo=repo_id, file_path=path, owner=owner)
-        if result["status"] == "success":
-            all_content[path] = result["content"]
-        else:
-            failed_files.append(path)
-            logger.warning(f"Failed to get content for {path}: {result.get('message', 'Unknown error')}")
+        all_content = {}
+        failed_files = []
+        for path in file_list:
+            logger.info(f"Fetching content for file: {path}")
+            result = get_file_contents(repo=repo_id, file_path=path, owner=owner)
+            logger.info(f"Result for {path}: {result['status']}")
+            if result["status"] == "success":
+                all_content[path] = result["content"]
+            else:
+                failed_files.append(path)
+                logger.warning(f"Failed to get content for {path}: {result.get('message', 'Unknown error')}")
 
-    request.app.state.file_contents = all_content
-    request.app.state.repo_id = repo_id
-    
-    logger.info(f"Successfully loaded {len(all_content)} files, {len(failed_files)} failed")
-    return {
-        "status": "success", 
-        "files_loaded": len(all_content),
-        "files_failed": len(failed_files),
-        "failed_files": failed_files
-    }
-
+        request.app.state.file_contents = all_content
+        request.app.state.repo_id = repo_id
+        
+        logger.info(f"Successfully loaded {len(all_content)} files, {len(failed_files)} failed")
+        return {
+            "status": "success", 
+            "files_loaded": len(all_content),
+            "files_failed": len(failed_files),
+            "failed_files": failed_files
+        }
+    except Exception as e:
+        logger.exception(f"Exception during repository loading: {e}")
+        return {"status": "error", "message": str(e)}
 
 @router.post("/ingest")
 async def ingest_repo(request: Request):
@@ -62,12 +69,10 @@ async def ingest_repo(request: Request):
 
 
 @router.post("/search")
-async def search(request: Request, query: str, file_path: str = None, function_name: str = None):
+async def search(request: Request, query: str, file_path: str = None):
     logger.info(f"Performing search with query: '{query}'")
     
     try:
-        client = request.app.state.qdrant
-        embedder = request.app.state.jina_embedder
         search_service = request.app.state.search_service
         repo_id = getattr(request.app.state, "repo_id", None)
 
@@ -78,8 +83,7 @@ async def search(request: Request, query: str, file_path: str = None, function_n
         results = search_service.semantic_search(
             query=query,
             repo_id=repo_id,
-            file_path=file_path,
-            function_name=function_name
+            file_path=file_path
         )
         
         logger.info(f"Search completed, found {len(results.points) if hasattr(results, 'points') else 'unknown'} results")

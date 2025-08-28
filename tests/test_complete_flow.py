@@ -132,7 +132,7 @@ class RepoAnalyzerTester:
             if response.status_code == 200:
                 result = response.json()
                 if result["status"] == "success":
-                    logger.info(f"Search completed successfully, found results")
+                    logger.info(f"Search completed successfully, found results: {result.get('results', [])}")
                     return result
                 else:
                     logger.error(f"Search failed: {result}")
@@ -231,9 +231,18 @@ def run_complete_test():
     if search_results:
         logger.info("Search results preview:")
         for query, result in search_results[:3]:
-            if "results" in result and hasattr(result["results"], "points"):
-                points_count = len(result["results"].points)
-                logger.info(f"  '{query}': {points_count} results found")
+            results_obj = result.get("results")
+            if hasattr(results_obj, "points"):
+                points = results_obj.points
+            elif isinstance(results_obj, dict) and "points" in results_obj:
+                points = results_obj["points"]
+            elif isinstance(results_obj, list):
+                points = results_obj
+            else:
+                points = []
+            logger.info(f"  '{query}': {len(points)} results found")
+            if points:
+                logger.info(f"    Sample result: {points[0]}")
     
     logger.info("=" * 50)
     logger.info("Complete test flow finished successfully!")

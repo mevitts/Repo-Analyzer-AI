@@ -3,7 +3,7 @@ fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 
 # Google Cloud and AI dependencies
-google-adk
+google-api-core
 google-cloud-secret-manager
 google-generativeai
 
@@ -19,7 +19,7 @@ qdrant-client
 
 # HTTP requests and utilities
 requests
-arrow
+arrow>=1.2.3
 bleach
 
 # Type hints support
