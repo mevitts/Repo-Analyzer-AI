@@ -1,9 +1,24 @@
 import random
 from collections import defaultdict
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
+from pydantic import Strict
 import requests
 import os
 import numpy as np
+from scipy import cluster
+from sklearn.cluster import KMeans
+import jsonschema
+from jsonschema import ValidationError
+import json
+
+cluster_schema = {"cluster_id": "<id>", 
+                  "title": "<short human label>", 
+                  "summary": "<2-4 sentences>", 
+                  "key_files": ["path/a.py", "path/b.py"], 
+                  "notable_symbols": ["ClassX", "function_y"]
+                }
+
+repo_schema = 
 
 def gemini_summarize(prompt: str, api_key: Optional[str] = None, model: str = "models/gemini-1.5-pro-latest") -> str:
     """
@@ -93,4 +108,140 @@ def preprocess_points(points: List[Dict[str, Any]]):
     X = X / np.clip(norms, 1e-8, None)
     return X, meta
 
+def run_kmeans(X: np.ndarray, n_clusters: int = 10, random_state: int = 42) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Runs KMeans clustering on X.
+    Returns: (labels, centroids)
+    """
+    kmeans = KMeans(n_clusters=n_clusters, random_state=random_state, n_init="auto")
+    labels = kmeans.fit_predict(X)
+    centroids = kmeans.cluster_centers_
+    return labels, centroids
 
+def assign_clusters_and_scores(X: np.ndarray, meta: List[Dict[str, Any]], labels: np.ndarray, centroids: np.ndarray):
+    """
+    Assigns cluster_id to each meta entry and computes distances to centroid.
+    Returns:
+        meta_with_cluster: meta list with 'cluster_id' and 'distance_to_centroid' added
+        clusters: dict of cluster_id -> {centroid, member_indices, member_ids}
+    """
+    if X.size == 0 or labels.size == 0 or centroids.size == 0:
+        return []
+    
+    meta_with_cluster = []
+    clusters = defaultdict(lambda: {"centroid": None, "member_indices": [], "member_ids": []})
+    
+    for i, (m, label) in enumerate(zip(meta, labels)):
+        m = dict(m)  # make a copy
+        m["cluster_id"] = int(label)
+        dist = np.linalg.norm(X[i] - centroids[label])
+        m["distance_to_centroid"] = float(dist)
+        meta_with_cluster.append(m)
+        
+        clusters[label]["member_indices"].append(i)
+        clusters[label]["member_ids"].append(m["id"])
+        clusters[label]["centroid"] = centroids[label]
+        
+    return meta_with_cluster, clusters
+
+def get_clusters_and_labels(meta_with_cluster: List[Dict[str, Any]], clusters: Dict[int, Dict[str, Any]], n_labels: int = 6) -> Dict[int, List[str]]:
+    """
+    For each cluster, get top n_labels filenames as labels.
+    Returns: dict of cluster_id -> {representatiteves, label, top_dirs, top_files}
+    """
+    cluster_labels = {}
+    for cluster_id, info in clusters.items():
+        members = [meta_with_cluster[i] for i in info["member_indices"]]
+        # Sort members by distance to centroid
+        members_sorted = sorted(members, key=lambda m: m["distance_to_centroid"])
+        #select top n 
+        top_members = members_sorted[:n_labels]
+        cluster_labels[cluster_id] = {
+            "representatives": top_members,
+            "label": top_members[0]["filename"] if top_members else None,
+            "top_dirs": list({m["dirpath"] for m in top_members}),
+            "top_files": list({m["filename"] for m in top_members}),
+        }
+
+    return cluster_labels
+
+def build_cluster_prompt(cluster_labels: dict, repo_id: str) -> str:
+    """
+    Build a prompt for a single cluster using its members, label, filepaths, line ranges, and any signature hints.
+    """
+    members = cluster_labels.get("representatives", [])
+    proto_label = cluster_labels.get("label", "")
+    
+    prompt = f"Repo: {repo_id}\nCluster label: {proto_label}\n\n"
+    for mem in members:
+        fp = mem.get("filepath", "")
+        payload = mem.get("payload", {})
+        start = payload.get("start_line_no", "?")
+        end = payload.get("end_line_no", "?")
+        excerpt = payload.get("excerpt", "")
+        ancestors = payload.get("ancestors", "")
+        signature = payload.get("signature", "")
+        
+        if ancestors:
+            prompt += f"Ancestors: {ancestors}\n"
+        if signature:
+            prompt += f"Signature: {signature}\n"
+            
+        prompt += f"Excerpt (truncated to 600 chars):\n{excerpt}\n\n"
+        prompt += (
+        "Summarize what this group does (1-2 sentences), key responsibilities/data, and notable entry points.\n"
+        "Only use facts present in the excerpts, file paths, and symbols. Do not speculate beyond the provided text.\n"
+        f"Strict JSON output: {cluster_schema}"
+        )
+        
+    return prompt
+
+def build_repo_prompt(cluster_jsons: List[dict], repo_metrics: dict) -> str:
+    """
+    Build a prompt for repo-level summary using all cluster summaries and repo metrics.
+    """
+    prompt = (
+        "You are an expert code summarizer. Given the following clusters and repo metrics, "
+        "produce a concise repo summary and cluster breakdown.\n\n"
+        f"Repo metrics: {repo_metrics}\n\n"
+        "Clusters:\n"
+    )
+    
+    for c in cluster_jsons:
+        title = c.get("title", "")
+        summary = c.get("summary", "")
+        key_files = c.get("key_files", [])
+        prompt += f"- {title}: {summary}\n"
+        if key_files:
+            prompt += f"  Key files: {', '.join(key_files)}\n"
+            
+    prompt += f"""
+        Output format (strict JSON):
+        {repo_schema}
+        Return only this JSON object.
+    """
+    
+    return prompt
+
+def summarize_cluster(cluster_info: dict, repo_id: str, api_key: Optional[str] = None) -> dict:
+    prompt = build_cluster_prompt(cluster_info, repo_id)
+    summary = gemini_summarize(prompt, api_key=api_key)
+    
+    try:
+        convert = jsonschema.validate(instance=summary, schema=cluster_schema)
+    except ValidationError as e:
+        print(f"Validation Error: {e.message}")
+        print(f"Validation Error: {e.message}")
+
+    return json.loads(summary) if convert else {}
+
+def summarize_repo(cluster_jsons: List[dict], repo_metrics: dict, api_key: Optional[str] = None) -> dict:
+    prompt = build_repo_prompt(cluster_jsons, repo_metrics)
+    summary = gemini_summarize(prompt, api_key=api_key)
+    try:
+        convert = jsonschema.validate(instance=summary, schema=repo_schema)
+    except ValidationError as e:
+        print(f"Validation Error: {e.message}")
+        print(f"Validation Error: {e.message}")
+
+    return json.loads(summary) if convert else {}
