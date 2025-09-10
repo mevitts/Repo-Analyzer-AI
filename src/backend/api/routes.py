@@ -3,6 +3,7 @@ import logging
 from src.backend.services.embedding_service import process_repo
 from src.backend.utils.embed_utils import JinaEmbedder
 from src.backend.utils.file_utils import list_files, get_file_contents
+from src.backend.utils import summarization_utils
 
 logger = logging.getLogger(__name__)
 
@@ -120,3 +121,86 @@ def get_status(request: Request):
             "search_service": hasattr(request.app.state, "search_service")
         }
     }
+    
+
+@router.post("/summarize_repo")
+async def summarize_repo(
+    request: Request, 
+    repo_id: str, 
+    max_points: int = 1000, 
+    cluster_k: int = 10, 
+    reps_per_cluster: int = 3, 
+    max_snippets: int = 5
+):
+    """Summarize the repository and its contents"""
+
+    logger.info(f"Starting summarization for repo {repo_id}")
+    client = request.app.state.qdrant
+    collection_name = f"repo_{repo_id}"
+    # Now use client and collection_name for all Qdrant operations
+    
+    if not hasattr(request.app.state, "atlas_cache"):
+        request.app.state.atlas_cache = {}
+
+    try:
+        points = client.scroll(collection_name=collection_name, limit=max_points).points
+        logger.info(f"Fetched {len(points)} points from Qdrant for summarization")
+        
+        sampled = summarization_utils.stratified_downsample(points, n_max=max_points)
+        X, meta = summarization_utils.preprocess_points(sampled)
+        labels, centroids = summarization_utils.run_kmeans(X, n_clusters=cluster_k)
+        meta_with_cluster, clusters = summarization_utils.assign_clusters_and_scores(X, meta, labels, centroids)
+        cluster_labels = summarization_utils.get_clusters_and_labels(meta_with_cluster, clusters, n_labels=reps_per_cluster)
+        
+        cluster_summaries = []
+        for cluster_id, info in cluster_labels.items():
+            summary = summarization_utils.summarize_cluster(info, repo_id=repo_id)
+            cluster_summaries.append(summary)
+        
+        repo_metrics = {
+            "points": len(points),
+            "clusters": len(clusters),
+            "files": len({m["filepath"] for m in meta}),
+            "top_dirs": list({m["dirpath"] for m in meta})[:5]
+        }
+        repo_summary = summarization_utils.summarize_repo(cluster_summaries, repo_metrics=repo_metrics)
+        
+        summarization_utils.clusters_to_qdrant(client, collection_name=collection_name, meta_with_cluster=meta_with_cluster)
+        logger.info(f"Summarization completed for repo {repo_id}")
+        
+    except Exception as e:
+        logger.error(f"Summarization failed: {str(e)}")
+        
+    return {
+            "repo_id": repo_id,
+            "metrics": repo_metrics,
+            "repo_summary": repo_summary,
+            "clusters": cluster_summaries
+        }
+    
+
+@router.post("/atlas_pack")
+async def atlas_pack(
+    request: Request,
+    repo_id: str,
+    similarity_threshold: float = 0.8
+):
+    """Build and return the atlas pack for a repo"""
+    logger.info(f"Building atlas pack for repo {repo_id}")
+    
+    client = request.app.state.qdrant
+    collection_name = f"repo_{repo_id}"
+    
+    meta_with_cluster = getattr(request.app.state, "atlas_cache", {}).get(repo_id)
+    if not meta_with_cluster:
+        logger.error(f"No cached cluster assignments for repo {repo_id}. Run /summarize_repo first.")
+        return {"status": "error", "message": "No cached cluster assignments. Run /summarize_repo first."}
+
+    try:
+        atlas_pack = summarization_utils.build_atlas_pack(meta_with_cluster, repo_id=repo_id, similarity_threshold=similarity_threshold)
+        logger.info(f"Atlas pack built for repo {repo_id}")
+        return {"repo_id": repo_id, "atlas_pack": atlas_pack}
+    
+    except Exception as e:
+        logger.error(f"Atlas pack build failed: {str(e)}")
+        return {"status": "error", "message": str(e)}

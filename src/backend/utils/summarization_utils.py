@@ -10,6 +10,7 @@ from sklearn.cluster import KMeans
 import jsonschema
 from jsonschema import ValidationError
 import json
+from umap import UMAP
 
 cluster_schema = {"cluster_id": "<id>", 
                   "title": "<short human label>", 
@@ -18,7 +19,38 @@ cluster_schema = {"cluster_id": "<id>",
                   "notable_symbols": ["ClassX", "function_y"]
                 }
 
-repo_schema = 
+repo_schema = {
+    "repo_id": "<string>",
+    "metrics": {
+        "points": "<int>",
+        "clusters": "<int>",
+        "files": "<int>",
+        "top_dirs": ["<string>", "<string>"]
+    },
+    "repo_summary": {
+        "title": "<short repo label>",
+        "overview": "<1-paragraph summary>",
+        "sections": [
+            {"title": "<cluster title>", "summary": "<one-line what it does>"}
+        ]
+    },
+    "clusters": [
+        {
+            "cluster_id": "<id>",
+            "title": "<short human label>",
+            "summary": "<2-4 sentences>",
+            "key_files": ["path/a.py", "path/b.py"],
+            "notable_symbols": ["ClassX", "function_y"],
+            "representatives": [
+                {"point_id": "...", "filepath": "...", "start": "<int>", "end": "<int>", "preview": "code excerpt ..."}
+            ]
+        }
+    ],
+    "atlas_pack": {
+        "nodes": [{"id": "<point_id>", "score": "<float>"}],
+        "edges": [{"source": "<point_id>", "target": "<point_id>", "type": "semantic", "weight": "<float>"}]
+    }
+}
 
 def gemini_summarize(prompt: str, api_key: Optional[str] = None, model: str = "models/gemini-1.5-pro-latest") -> str:
     """
@@ -144,7 +176,7 @@ def assign_clusters_and_scores(X: np.ndarray, meta: List[Dict[str, Any]], labels
         
     return meta_with_cluster, clusters
 
-def get_clusters_and_labels(meta_with_cluster: List[Dict[str, Any]], clusters: Dict[int, Dict[str, Any]], n_labels: int = 6) -> Dict[int, List[str]]:
+def get_clusters_and_labels(meta_with_cluster: List[Dict[str, Any]], clusters: Dict[int, Dict[str, Any]], n_labels: int = 6) -> Dict[int, Dict[str, Any]]:
     """
     For each cluster, get top n_labels filenames as labels.
     Returns: dict of cluster_id -> {representatiteves, label, top_dirs, top_files}
@@ -245,3 +277,68 @@ def summarize_repo(cluster_jsons: List[dict], repo_metrics: dict, api_key: Optio
         print(f"Validation Error: {e.message}")
 
     return json.loads(summary) if convert else {}
+
+def clusters_to_qdrant(qdrant_client, collection_name: str, meta_with_cluster: list):
+    """
+    Updates Qdrant payloads for each point with its assigned cluster_id.
+    """
+    for meta in meta_with_cluster:
+        point_id = meta.get("id")
+        cluster_id = meta.get("cluster_id")
+        if point_id is not None and cluster_id is not None:
+            qdrant_client.set_payload(
+                collection_name=collection_name,
+                payload={"cluster_id": cluster_id},
+                points=[point_id]
+            )
+
+def build_atlas_pack(meta_with_cluster: list, repo_id: str, similarity_threshold: float = 0.8, k_sim: int = 5) -> dict:
+    """
+    Builds an atlas pack: nodes (points) and edges (semantic relationships).
+    Nodes represent code points: id, label, filepath, cluster_id, pos, score
+    Edges represent semantic similarity above a set threshold: semantic kNN (k_sim) using cosine similarity
+    """
+    nodes = []
+    vectors = []
+    ids = []
+    #node building (id and distance score) and vector collection
+    for meta in meta_with_cluster:
+        node = {
+            "id": meta["id"],
+            "label": meta["filename"],
+            "filepath": meta["filepath"],
+            "cluster_id": meta["cluster_id"],
+            "score": meta.get("distance_to_centroid", 0.0)
+        }
+        nodes.append(node)
+        vec = meta.get("vector")
+        if vec is not None:
+            vectors.append(vec)
+            ids.append(meta["id"])
+        else:
+            vectors.append(np.zeros(10))
+            ids.append(meta["id"])
+
+    if len(vectors) > 0:
+        reducer = UMAP(n_components=2, random_state=42)
+        vecs_np = np.array(vectors)
+        pos_2d = reducer.fit_transform(vecs_np)
+        for i, node in enumerate(nodes):
+            node["pos"] = {"x": float(pos_2d[i, 0]), "y": float(pos_2d[i, 1])}
+
+    edges = []
+    #kNN edges (top k_sim neighbors)
+    vecs_np = np.array(vectors)
+    for i, vec_a in enumerate(vecs_np):
+        sims = np.dot(vecs_np, vec_a) / (np.linalg.norm(vecs_np, axis=1) * np.linalg.norm(vec_a) + 1e-8)
+        # Get top k_sim indices (excluding self, above threshold)
+        top_k = sorted([(j, sim) for j, sim in enumerate(sims) if j != i and sim >= similarity_threshold], key=lambda x: -x[1])[:k_sim]
+        for j, sim in top_k:
+            edges.append({
+                "source": ids[i],
+                "target": ids[j],
+                "type": "semantic",
+                "weight": float(sim)
+            })
+
+    return {"nodes": nodes, "edges": edges}

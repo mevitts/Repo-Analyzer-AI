@@ -21,6 +21,8 @@ import time
 import requests
 from typing import Dict, Any
 from dotenv import load_dotenv
+import pytest
+from src.backend.utils import summarization_utils
 
 load_dotenv()
 
@@ -281,3 +283,38 @@ if __name__ == "__main__":
         run_complete_test()
     else:
         logger.error("Requirements check failed")
+
+def test_summarize_repo_and_atlas_pack(mock_qdrant_client):
+    repo_id = "testrepo"
+    # Simulate Qdrant points
+    points = [
+        {
+            "id": f"pt_{i}",
+            "vector": [float(j) for j in range(10)],
+            "payload": {"filepath": f"file_{i}.py"}
+        }
+        for i in range(20)
+    ]
+    # Mock Qdrant client scroll
+    mock_qdrant_client.scroll.return_value.points = points
+
+    # Summarize repo
+    sampled = summarization_utils.stratified_downsample(points, n_max=20)
+    X, meta = summarization_utils.preprocess_points(sampled)
+    labels, centroids = summarization_utils.run_kmeans(X, n_clusters=3)
+    meta_with_cluster, clusters = summarization_utils.assign_clusters_and_scores(X, meta, labels, centroids)
+    cluster_labels = summarization_utils.get_clusters_and_labels(meta_with_cluster, clusters, n_labels=2)
+    # Fake cluster summaries
+    cluster_summaries = [{"cluster_id": k, "title": "Test", "summary": "Test summary", "key_files": [], "notable_symbols": []} for k in cluster_labels]
+    repo_metrics = {
+        "points": len(points),
+        "clusters": len(clusters),
+        "files": len({m["filepath"] for m in meta}),
+        "top_dirs": list({m["dirpath"] for m in meta})[:5]
+    }
+    repo_summary = summarization_utils.summarize_repo(cluster_summaries, repo_metrics=repo_metrics)
+    assert "repo_id" in repo_summary
+
+    # Atlas pack
+    atlas_pack = summarization_utils.build_atlas_pack(meta_with_cluster, repo_id=repo_id)
+    assert "nodes" in atlas_pack and "edges" in atlas_pack
