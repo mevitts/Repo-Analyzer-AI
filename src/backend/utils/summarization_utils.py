@@ -323,22 +323,35 @@ def build_atlas_pack(meta_with_cluster: list, repo_id: str, similarity_threshold
         reducer = UMAP(n_components=2, random_state=42)
         vecs_np = np.array(vectors)
         pos_2d = reducer.fit_transform(vecs_np)
-        for i, node in enumerate(nodes):
-            node["pos"] = {"x": float(pos_2d[i, 0]), "y": float(pos_2d[i, 1])}
+        
+        if isinstance(pos_2d, np.ndarray) and pos_2d.ndim == 2 and pos_2d.shape[1] == 2:
+            for i, node in enumerate(nodes):
+                node["pos"] = {"x": float(pos_2d[i, 0]), "y": float(pos_2d[i, 1])}
+        else:
+            for node in nodes:
+                node["pos"] = {"x": 0.0, "y": 0.0}
 
-    edges = []
-    #kNN edges (top k_sim neighbors)
+    edges = set()
     vecs_np = np.array(vectors)
-    for i, vec_a in enumerate(vecs_np):
-        sims = np.dot(vecs_np, vec_a) / (np.linalg.norm(vecs_np, axis=1) * np.linalg.norm(vec_a) + 1e-8)
-        # Get top k_sim indices (excluding self, above threshold)
-        top_k = sorted([(j, sim) for j, sim in enumerate(sims) if j != i and sim >= similarity_threshold], key=lambda x: -x[1])[:k_sim]
-        for j, sim in top_k:
-            edges.append({
-                "source": ids[i],
-                "target": ids[j],
-                "type": "semantic",
-                "weight": float(sim)
-            })
+    norms = np.linalg.norm(vecs_np, axis=1)
 
-    return {"nodes": nodes, "edges": edges}
+    for i, vec_a in enumerate(vecs_np):
+        similarities = np.dot(vecs_np, vec_a) / (norms * np.linalg.norm(vec_a) + 1e-8)
+
+        #get top k indices
+        top_k_idx = np.argpartition(-similarities, k_sim+1)[:k_sim+1]
+        candidates = [(j, similarities[j]) for j in top_k_idx if j != i and similarities[j] >= similarity_threshold]
+
+        #sort and take top k
+        top_k = sorted(candidates, key=lambda x: -x[1])[:k_sim]
+
+        for j, similarity in top_k:
+            edge = (min(ids[i], ids[j]), max(ids[i], ids[j]), float(similarity))
+            edges.add(edge)
+
+    edge_list = [
+        {"source": src, "target": tgt, "type": "semantic", "weight": weight}
+        for src, tgt, weight in edges
+    ]
+
+    return {"nodes": nodes, "edges": edge_list}

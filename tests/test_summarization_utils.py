@@ -3,6 +3,32 @@ import numpy as np
 from src.backend.utils import summarization_utils
 
 class TestSummarizationUtils(unittest.TestCase):
+    def test_build_atlas_pack(self):
+        # Create mock meta_with_cluster
+        meta_with_cluster = [
+            {"id": "pt1", "filename": "a.py", "filepath": "src/a.py", "cluster_id": 0, "distance_to_centroid": 0.1, "vector": [1.0, 0.0]},
+            {"id": "pt2", "filename": "b.py", "filepath": "src/b.py", "cluster_id": 0, "distance_to_centroid": 0.2, "vector": [0.0, 1.0]},
+            {"id": "pt3", "filename": "c.py", "filepath": "src/c.py", "cluster_id": 1, "distance_to_centroid": 0.3, "vector": [1.0, 1.0]}
+        ]
+        atlas = summarization_utils.build_atlas_pack(meta_with_cluster, repo_id="repo1", similarity_threshold=0.1, k_sim=2)
+        self.assertIn("nodes", atlas)
+        self.assertIn("edges", atlas)
+        self.assertEqual(len(atlas["nodes"]), 3)
+        # Check node fields
+        for node in atlas["nodes"]:
+            self.assertIn("id", node)
+            self.assertIn("label", node)
+            self.assertIn("filepath", node)
+            self.assertIn("cluster_id", node)
+            self.assertIn("score", node)
+            self.assertIn("pos", node)
+        # Check edge fields
+        for edge in atlas["edges"]:
+            self.assertIn("source", edge)
+            self.assertIn("target", edge)
+            self.assertIn("type", edge)
+            self.assertIn("weight", edge)
+            
     def test_stratified_downsample(self):
         points = [
             {"payload": {"filepath": "a.py"}}, {"payload": {"filepath": "a.py"}},
