@@ -1,3 +1,4 @@
+import hashlib
 import random
 from collections import defaultdict
 from typing import List, Dict, Any, Optional, Tuple
@@ -10,6 +11,7 @@ from sklearn.cluster import KMeans
 import jsonschema
 from jsonschema import ValidationError
 import json
+import re
 from umap import UMAP
 
 cluster_schema = {"cluster_id": "<id>", 
@@ -176,17 +178,23 @@ def assign_clusters_and_scores(X: np.ndarray, meta: List[Dict[str, Any]], labels
         
     return meta_with_cluster, clusters
 
-def get_clusters_and_labels(meta_with_cluster: List[Dict[str, Any]], clusters: Dict[int, Dict[str, Any]], n_labels: int = 6) -> Dict[int, Dict[str, Any]]:
+def get_clusters_and_labels(meta_with_cluster: List[Dict[str, Any]], clusters: Dict[int, Dict[str, Any]], n_labels: Optional[int] = None, n_min: int = 3) -> Dict[int, Dict[str, Any]]:
     """
     For each cluster, get top n_labels filenames as labels.
-    Returns: dict of cluster_id -> {representatiteves, label, top_dirs, top_files}
+    n_labels: max number of representatives per cluster (token guard). Default: 6.
+    Returns: dict of cluster_id -> {representatives, label, top_dirs, top_files}
     """
+    
+    misc_members = []
     cluster_labels = {}
     for cluster_id, info in clusters.items():
         members = [meta_with_cluster[i] for i in info["member_indices"]]
+        if len(members) <= n_min:
+            misc_members.extend(members)
+            continue
         # Sort members by distance to centroid
         members_sorted = sorted(members, key=lambda m: m["distance_to_centroid"])
-        #select top n 
+        # Token guard: cap number of representatives per cluster to n_labels
         top_members = members_sorted[:n_labels]
         cluster_labels[cluster_id] = {
             "representatives": top_members,
@@ -194,17 +202,29 @@ def get_clusters_and_labels(meta_with_cluster: List[Dict[str, Any]], clusters: D
             "top_dirs": list({m["dirpath"] for m in top_members}),
             "top_files": list({m["filename"] for m in top_members}),
         }
+        
+        if misc_members:
+            misc_sorted = sorted(misc_members, key=lambda m: m["distance_to_centroid"])
+            misc_top = misc_sorted[:n_labels]
+            cluster_labels["misc"] = {
+                "representatives": misc_top,
+                "label": "misc", 
+                "top_dirs": list({m["dirpath"] for m in misc_top}),
+                "top_files": list({m["filename"] for m in misc_top}),
+            }
 
     return cluster_labels
 
-def build_cluster_prompt(cluster_labels: dict, repo_id: str) -> str:
+def build_cluster_prompt(cluster_labels: dict, repo_id: str, max_snippet_chars: Optional[int] = None) -> str:
     """
     Build a prompt for a single cluster using its members, label, filepaths, line ranges, and any signature hints.
+    max_snippet_chars: max length for code excerpts (token guard). Default: 600.
     """
     members = cluster_labels.get("representatives", [])
     proto_label = cluster_labels.get("label", "")
-    
     prompt = f"Repo: {repo_id}\nCluster label: {proto_label}\n\n"
+    key_files = cluster_labels.get("key_files", [])
+    max_snippet_chars = max_snippet_chars if max_snippet_chars is not None else 600
     for mem in members:
         fp = mem.get("filepath", "")
         payload = mem.get("payload", {})
@@ -213,19 +233,20 @@ def build_cluster_prompt(cluster_labels: dict, repo_id: str) -> str:
         excerpt = payload.get("excerpt", "")
         ancestors = payload.get("ancestors", "")
         signature = payload.get("signature", "")
-        
+        # Token guard: truncate excerpt to max_snippet_chars
+        if excerpt and len(excerpt) > max_snippet_chars:
+            excerpt = excerpt[:max_snippet_chars] + "..."
         if ancestors:
             prompt += f"Ancestors: {ancestors}\n"
         if signature:
             prompt += f"Signature: {signature}\n"
-            
-        prompt += f"Excerpt (truncated to 600 chars):\n{excerpt}\n\n"
+        prompt += f"Excerpt (truncated to {max_snippet_chars} chars):\n{excerpt}\n\n"
         prompt += (
-        "Summarize what this group does (1-2 sentences), key responsibilities/data, and notable entry points.\n"
-        "Only use facts present in the excerpts, file paths, and symbols. Do not speculate beyond the provided text.\n"
-        f"Strict JSON output: {cluster_schema}"
+            "Summarize what this group does (1-2 sentences), key responsibilities/data, and notable entry points.\n"
+            "Only use facts present in the excerpts, file paths, and symbols. Do not speculate beyond the provided text.\n"
+            f"Only mention files from this list: {key_files}. Do not reference any other files.\n"
+            f"Strict JSON output: {cluster_schema}"
         )
-        
     return prompt
 
 def build_repo_prompt(cluster_jsons: List[dict], repo_metrics: dict) -> str:
@@ -235,6 +256,7 @@ def build_repo_prompt(cluster_jsons: List[dict], repo_metrics: dict) -> str:
     prompt = (
         "You are an expert code summarizer. Given the following clusters and repo metrics, "
         "produce a concise repo summary and cluster breakdown.\n\n"
+        "Only use facts present in the excerpts, file paths, and symbols. Do not speculate beyond the provided text.\n"
         f"Repo metrics: {repo_metrics}\n\n"
         "Clusters:\n"
     )
@@ -255,17 +277,32 @@ def build_repo_prompt(cluster_jsons: List[dict], repo_metrics: dict) -> str:
     
     return prompt
 
-def summarize_cluster(cluster_info: dict, repo_id: str, api_key: Optional[str] = None) -> dict:
+def summarize_cluster(cluster_info: dict, repo_id: str, api_key: Optional[str] = None, max_retries: int = 2) -> dict:
+    """
+    Summarize a cluster using LLM, with sanity check: if summary mentions files not in key_files, re-run with stricter prompt.
+    """
     prompt = build_cluster_prompt(cluster_info, repo_id)
-    summary = gemini_summarize(prompt, api_key=api_key)
     
-    try:
-        convert = jsonschema.validate(instance=summary, schema=cluster_schema)
-    except ValidationError as e:
-        print(f"Validation Error: {e.message}")
-        print(f"Validation Error: {e.message}")
+    for attempt in range(max_retries):
+        summary_str = gemini_summarize(prompt, api_key=api_key)
+        summary = json.loads(summary_str)
+        jsonschema.validate(instance=summary, schema=cluster_schema)
 
-    return json.loads(summary) if convert else {}
+        #check for mentioned files not in key_files
+        key_files = set(cluster_info.get("key_files", []))
+        file_pattern = r'[\w\-/]+\.py'
+        found_files = set(re.findall(file_pattern, summary.get("summary", "")))
+        extra_files = found_files - key_files
+        if extra_files:
+            print(f"Sanity check failed: summary mentions files not in key_files: {extra_files}")
+            for file in extra_files:
+                summary["summary"] = summary["summary"].replace(file, "")
+            continue
+
+        return summary
+    # If all attempts fail, return summmary and log warning (console for now)
+    print(f"Fallback: returning summary with extra files removed. Files: {extra_files}")
+    return summary
 
 def summarize_repo(cluster_jsons: List[dict], repo_metrics: dict, api_key: Optional[str] = None) -> dict:
     prompt = build_repo_prompt(cluster_jsons, repo_metrics)
@@ -355,3 +392,14 @@ def build_atlas_pack(meta_with_cluster: list, repo_id: str, similarity_threshold
     ]
 
     return {"nodes": nodes, "edges": edge_list}
+
+def compute_content_hash(points: List[Dict[str, Any]]) -> str:
+    """
+    Computes a SHA256 hash of the concatenated filepaths and optionally file contents/excerpts.
+    This is used to cache cluster results by repo version/content.
+    """
+    hash_input = "".join(
+        str(pt.get("payload", {}).get("filepath", "")) + str(pt.get("payload", {}).get("excerpt", ""))
+        for pt in points
+    )
+    return hashlib.sha256(hash_input.encode("utf-8")).hexdigest()

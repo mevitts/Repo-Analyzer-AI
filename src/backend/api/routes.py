@@ -144,6 +144,16 @@ async def summarize_repo(
 
     try:
         points = client.scroll(collection_name=collection_name, limit=max_points).points
+        content_hash = summarization_utils.compute_content_hash(points)
+        cache_key = (repo_id, content_hash)
+        
+        if not hasattr(request.app.state, "summarization_cache"):
+            cache = request.app.state.summarization_cache = {}
+
+        if cache_key in cache:
+            logger.info(f"Returning cached summary for {repo_id} version {content_hash}")
+            return cache[cache_key]
+        
         logger.info(f"Fetched {len(points)} points from Qdrant for summarization")
         
         sampled = summarization_utils.stratified_downsample(points, n_max=max_points)
@@ -167,6 +177,16 @@ async def summarize_repo(
         
         summarization_utils.clusters_to_qdrant(client, collection_name=collection_name, meta_with_cluster=meta_with_cluster)
         logger.info(f"Summarization completed for repo {repo_id}")
+        
+        request.app.state.atlas_cache[repo_id] = meta_with_cluster
+
+        cache[cache_key] = {
+            "repo_id": repo_id,
+            "metrics": repo_metrics,
+            "repo_summary": repo_summary,
+            "clusters": cluster_summaries
+        }
+        return cache[cache_key]
         
     except Exception as e:
         logger.error(f"Summarization failed: {str(e)}")
