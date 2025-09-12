@@ -14,7 +14,7 @@ class SearchService:
         self.embedder = embedder
         self.repo_id = repo_id
 
-    def semantic_search(self, query: str, repo_id: str = None, file_path: str = None, n_max: int = 10):
+    def semantic_search(self, query: str, repo_id: str, file_path: str, n_max: int = 10):
         """
         Perform a semantic search on the repo with optional strict filtering.
         - If query is provided: use embedding search.
