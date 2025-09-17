@@ -17,6 +17,8 @@ While the long-term vision for Atlas is to be a comprehensive onboarding tool, i
 * **Semantic Search:** Go beyond simple keyword searches. You can use keywords and short phrases to find the most relevant code snippets, even if they don't contain the exact words you used.
 * **Chunk-Level Atlas (Experimental):** Dive deep into the code by exploring individual code chunks and their relationships within a file in a dedicated Atlas Viewer.
 
+<img width="1169" height="696" alt="image" src="https://github.com/user-attachments/assets/95c79ff3-9fa4-4187-a504-3f4ab9c8b6e1" />
+
 ---
 
 ## Architecture Overview
