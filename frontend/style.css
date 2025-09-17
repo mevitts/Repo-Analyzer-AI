@@ -1,28 +1,66 @@
-/* Import Google Fonts */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
-
-/* CSS Variables for Dark Theme */
-:root {
-    --bg-primary: #0a0a0a;
-    --bg-secondary: #111111;
-    --bg-tertiary: #1a1a1a;
-    --bg-card: #1e1e1e;
-    --bg-input: #2a2a2a;
-    --text-primary: #ffffff;
-    --text-secondary: #a0a0a0;
-    --text-muted: #666666;
-    --accent-green: #00ff88;
-    --accent-green-hover: #00cc6a;
-    --accent-blue: #3b82f6;
-    --accent-blue-hover: #2563eb;
-    --border-color: #333333;
-    --border-hover: #444444;
-    --shadow-light: 0 2px 8px rgba(0, 255, 136, 0.1);
-    --shadow-medium: 0 4px 16px rgba(0, 255, 136, 0.15);
-    --shadow-heavy: 0 8px 32px rgba(0, 255, 136, 0.2);
-    --gradient-primary: linear-gradient(135deg, #00ff88 0%, #00cc6a 100%);
-    --gradient-secondary: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
+/* Wrapper for action buttons */
+.action-btn-wrapper {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    align-items: center;
+    margin-top: 0;
+    margin-bottom: 0;
+    background: none;
+    border-radius: 0;
+    padding: 0;
+    box-shadow: none;
 }
+
+.action-btn-wrapper button {
+    font-family: 'Cinzel', serif;
+    font-size: 1rem;
+    color: #fff;
+    background: #3a6ea5;
+    border: 2px solid #3a6ea5;
+    border-radius: 8px;
+    padding: 10px 22px;
+    margin: 0;
+    transition: background 0.2s, color 0.2s, border 0.2s;
+    cursor: pointer;
+    letter-spacing: 0.04em;
+    box-shadow: none;
+}
+
+.action-btn-wrapper button:hover:not(:disabled) {
+    background: #c1440e;
+    color: #fff;
+    border-color: #c1440e;
+}
+
+.action-btn-wrapper button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+.button-container {
+    background: var(--bg-input);
+    color: var(--text-primary);
+    border: 2px solid var(--border-color);
+    border-radius: 12px;
+    font-size: 1rem;
+    font-family: "Cinzel", serif;
+    font-weight: 400;
+    padding: 1rem 1.5rem;
+    cursor: pointer;
+    transition: background 0.3s, border-color 0.3s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 0;
+    margin-top: 0.5rem;
+    margin-bottom: .5rem;
+    user-select: none;
+    outline: none;
+    text-align: left;
+}
+/* Import Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Cinzel:wght@700&display=swap');
+
 
 /* Reset and base styles */
 * {
@@ -32,14 +70,11 @@
 }
 
 body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: 'Inter', sans-serif;
     background: var(--bg-primary);
     color: var(--text-primary);
     line-height: 1.6;
     min-height: 100vh;
-    background-image: 
-        radial-gradient(circle at 20% 80%, rgba(0, 255, 136, 0.05) 0%, transparent 50%),
-        radial-gradient(circle at 80% 20%, rgba(0, 255, 136, 0.05) 0%, transparent 50%);
 }
 
 /* Container */
@@ -65,7 +100,7 @@ header::before {
     position: absolute;
     top: -20px;
     left: 50%;
-    transform: translateX(-50%);
+    --bg-card: #f5ecd7;
     width: 60px;
     height: 4px;
     background: var(--gradient-primary);
@@ -75,13 +110,30 @@ header::before {
 header h1 {
     font-size: 3.5rem;
     font-weight: 800;
-    background: var(--gradient-primary);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    font-family: 'Cinzel', serif;
     background-clip: text;
     margin-bottom: 1rem;
     letter-spacing: -0.02em;
+    color: #3a6ea5; /* <-- This sets the title color */
 }
+
+:root {
+    --bg-primary: #f5ecd7;
+    --bg-secondary: #e2d9c3;
+    --bg-tertiary: #c2b280;
+    --bg-card: #f5ecd7;
+    --bg-input: #e2d9c3;
+    --text-primary: #3a6ea5;
+    --text-secondary: #3a6ea5;
+    --text-muted: #c2b280;
+    --accent-gold: #c2b280;
+    --accent-blue: #3a6ea5;
+    --accent-red: #c1440e;
+    --border-color: #3a6ea5;
+    --border-hover: #c1440e;
+    --shadow-light: 0 2px 8px rgba(26, 38, 54, 0.1);
+}
+
 
 header p {
     color: var(--text-secondary);
@@ -92,10 +144,28 @@ header p {
 /* Form */
 .input-group {
     display: flex;
+    align-items: center;
     gap: 1rem;
-    margin-bottom: 2rem;
-    position: relative;
+    margin-bottom: 1.5rem;
 }
+
+.button-holder {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex: 0 0 auto;
+    margin-left: 1rem;
+}
+
+
+.mini-header {
+    font-family: 'Cinzel', serif;
+    font-size: 1.2rem;
+    color: var(--accent-gold);
+    margin-bottom: 1.2rem;
+    letter-spacing: 0.1em;
+}
+/* Removed stray curly brace and block causing syntax error */
 
 input[type="url"] {
     flex: 1;
@@ -106,8 +176,29 @@ input[type="url"] {
     font-size: 1rem;
     font-family: inherit;
     color: var(--text-primary);
-    transition: all 0.3s ease;
-    backdrop-filter: blur(10px);
+
+button {
+    background: var(--accent-blue);
+    color: var(--text-primary);
+    border: 2px solid var(--accent-blue);
+    border-radius: 12px;
+    font-size: 1rem;
+    font-weight: 600;
+    padding: 1rem 1.5rem;
+    cursor: pointer;
+    font-family: 'Cinzel', serif;
+    transition: background 0.3s, border-color 0.3s;
+    display: inline-block;
+    margin-left: 0;
+}
+
+
+.button-container:hover,
+.button-container:focus {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border-color: var(--accent-gold);
+}
 }
 
 input[type="url"]:focus {
@@ -117,27 +208,30 @@ input[type="url"]:focus {
     background: var(--bg-tertiary);
 }
 
-input[type="url"]::placeholder {
-    color: var(--text-muted);
+
+.results-container, .atlas-container {
+    background: var(--bg-card);
+    border: 2px solid var(--accent-gold);
+    border-radius: 16px;
+    box-shadow: var(--shadow-light);
 }
 
-button {
-    padding: 1rem 2rem;
-    background: var(--gradient-primary);
-    color: var(--bg-primary);
-    border: none;
-    border-radius: 12px;
-    font-size: 1rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    position: relative;
-    overflow: hidden;
-    white-space: nowrap;
+input[type="url"]::placeholder {
+    color: var(--accent-blue);
+    font-size: 0.9rem;
+    font-family: 'Cinzel', serif;
 }
+
 
 button::before {
     content: '';
+
+.thinking-log-entry {
+    background: var(--bg-tertiary);
+    color: var(--accent-blue);
+    border-left: 4px solid var(--accent-gold);
+    font-family: 'Merriweather', serif;
+}
     position: absolute;
     top: 0;
     left: -100%;
@@ -151,16 +245,17 @@ button:hover::before {
     left: 100%;
 }
 
+
 button:hover {
-    transform: translateY(-2px);
     box-shadow: var(--shadow-medium);
 }
 
-button:active {
-    transform: translateY(0);
-}
 
-button:disabled {
+
+
+
+
+.button-container[aria-disabled="true"] {
     opacity: 0.6;
     cursor: not-allowed;
     transform: none;
@@ -216,10 +311,6 @@ button:disabled {
     gap: 0.5rem;
 }
 
-.thinking-container h3::before {
-    content: '🧠';
-    font-size: 1.2rem;
-}
 
 #thinking-log {
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
@@ -376,26 +467,6 @@ button:disabled {
 .hidden {
     display: none;
 }
-
-/* Error states */
-.error {
-    background: rgba(220, 38, 38, 0.1);
-    border: 1px solid rgba(220, 38, 38, 0.3);
-    color: #fca5a5;
-    padding: 1rem;
-    border-radius: 12px;
-    margin: 1rem 0;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-}
-
-.error::before {
-    content: '⚠️';
-    font-size: 1.2rem;
-}
-
-/* Success states */
 .success {
     background: rgba(0, 255, 136, 0.1);
     border: 1px solid rgba(0, 255, 136, 0.3);
@@ -438,10 +509,6 @@ button:disabled {
         padding: 1rem;
     }
     
-    .input-group {
-        flex-direction: column;
-    }
-    
     header h1 {
         font-size: 2.5rem;
     }
@@ -482,4 +549,24 @@ button:disabled {
         radial-gradient(circle at 80% 20%, rgba(0, 255, 136, 0.03) 0%, transparent 50%);
     pointer-events: none;
     z-index: -1;
-} 
+}
+
+.atlas-title {
+    font-family: 'Cinzel', serif;
+    font-size: 2.5rem;
+    color: #3a6ea5;
+    text-align: center;
+    margin-bottom: 0.2rem;
+    border: none;
+}
+
+#atlas-graph {
+    width: 100%;
+    height: 80vh;
+    min-height: 600px;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: var(--bg-card);
+    margin: 0 auto;
+    display: block;
+}

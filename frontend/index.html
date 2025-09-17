@@ -12,12 +12,13 @@
 ">
     <title>Repository Analyzer</title>
     <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&display=swap" rel="stylesheet">
 </head>    
 <body>
     <div class="container">
         <header>
-            <h1>Repository Analyzer</h1>
-            <p>AI-powered repository analysis with real-time insights</p>
+            <h1 style="text-align:center; margin-bottom:0.2rem; border:none;">Atlas</h1>
+            <div class="mini-header" style="text-align:center;">repo guide</div>
         </header>
         
         <form id="analyze-form">
@@ -28,27 +29,45 @@
                     placeholder="Enter GitHub repository URL (e.g., https://github.com/google/generative-ai-python)"
                     required
                 >
-                <button type="submit" id="analyze-btn">Analyze Repository</button> 
+                <div class="action-btn-wrapper">
+                    <button type="button" id="ingest-btn">Ingest</button>
+                    <button type="button" id="summarize-btn" class="hidden">Summarize Repo</button>
+                    <button type="button" id="atlas-btn" class="hidden">View Atlas</button>
+                    <button type="button" id="search-btn" class="hidden">Semantic Search</button>
+                </div>
             </div>
         </form>
 
         <div id="loading" class="loading hidden">
             <div class="spinner"></div>
-            <p>Analyzing repository...</p>
+            <div id="thinking-log" class="thinking-log-entry"></div>
         </div>
 
-        <div id="thinking-container" class="thinking-container hidden">
-            <h3>Analysis Progress</h3>
-            <div id="thinking-log"></div>
-        </div>
-
+        <!-- Summary View -->
         <div id="results-container" class="results-container hidden">
             <h3>Analysis Report</h3>
             <div id="report-content"></div>
+            <button id="view-atlas-btn" class="hidden">View Atlas</button>
+        </div>
+
+        <!-- Atlas View -->
+        <div id="atlas-container" class="atlas-container hidden">
+            <h1 class="atlas-title">Repository Atlas</h1>
+            <div id="atlas-loading-msg"></div>
+            <div id="atlas-graph" style="width: 100vw; height: 80vh; min-height: 600px; border: 1px solid var(--border-color); border-radius: 12px;"></div>
+            <div id="atlas-sidebar"></div>
+        </div>
+
+        <!-- Search View -->
+        <div id="search-container" class="search-container hidden">
+             <h3>Semantic Search</h3>
+             <input type="text" id="search-input" placeholder="Search for code logic, e.g., 'user authentication logic'">
+             <div id="search-results"></div>
         </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
     <script type="module" src="js/app.js"></script>
 </body>
-</html> 
+</html>

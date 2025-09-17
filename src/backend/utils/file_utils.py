@@ -41,9 +41,7 @@ def list_files(repo: str, owner: str,
     exclude_extensions: Optional[Set[str]] = None,
     include_files: Optional[Set[str]] = None
 ) -> dict:
-
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
-
     if exclude_folders is None:
         exclude_folders = {'node_modules', '__pycache__', 'dist', 'build', 'out', 'target', 'vendor'}
     if exclude_extensions is None:
@@ -58,7 +56,13 @@ def list_files(repo: str, owner: str,
 
     logger.info(f"Successfully filtered files for repo {repo}")
     try:
-        response = requests.get(f"https://api.github.com/repos/{owner}/{repo}/git/trees/main?recursive=1", headers=headers)
+        # Get default branch
+        repo_resp = requests.get(f"https://api.github.com/repos/{owner}/{repo}", headers=headers)
+        repo_resp.raise_for_status()
+        repo_info = repo_resp.json()
+        default_branch = repo_info.get("default_branch", "main")
+
+        response = requests.get(f"https://api.github.com/repos/{owner}/{repo}/git/trees/{default_branch}?recursive=1", headers=headers)
         response.raise_for_status()
         logger.info(f"Successfully fetched file tree for repo {repo}")
 
@@ -70,13 +74,9 @@ def list_files(repo: str, owner: str,
         files = [file for file in files if not any(folder in file.split('/') for folder in exclude_folders)]
 
         logger.info(f"Successfully filtered files for repo {repo}")
-        files = [file for file in files if not any(file.endswith(ext) for ext in exclude_extensions)]
-
-        files = list(set(files) | context_files)
-
         return {"status": "success", "files": files}
-
     except Exception as e:
+        logger.error(f"Failed to list files: {e}")
         return {"status": "error", "message": str(e)}
 
 

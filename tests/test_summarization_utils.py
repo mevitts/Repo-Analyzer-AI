@@ -4,16 +4,15 @@ from src.backend.utils import summarization_utils
 
 class TestSummarizationUtils(unittest.TestCase):
     def test_build_atlas_pack(self):
-        # Create mock meta_with_cluster
+        # Create mock meta_with_cluster with at least 5 points
         meta_with_cluster = [
-            {"id": "pt1", "filename": "a.py", "filepath": "src/a.py", "cluster_id": 0, "distance_to_centroid": 0.1, "vector": [1.0, 0.0]},
-            {"id": "pt2", "filename": "b.py", "filepath": "src/b.py", "cluster_id": 0, "distance_to_centroid": 0.2, "vector": [0.0, 1.0]},
-            {"id": "pt3", "filename": "c.py", "filepath": "src/c.py", "cluster_id": 1, "distance_to_centroid": 0.3, "vector": [1.0, 1.0]}
+            {"id": f"pt{i}", "filename": f"{chr(97+i)}.py", "filepath": f"src/{chr(97+i)}.py", "cluster_id": i%2, "distance_to_centroid": 0.1*i, "vector": [float(i), float(i%2)]}
+            for i in range(5)
         ]
         atlas = summarization_utils.build_atlas_pack(meta_with_cluster, repo_id="repo1", similarity_threshold=0.1, k_sim=2)
         self.assertIn("nodes", atlas)
         self.assertIn("edges", atlas)
-        self.assertEqual(len(atlas["nodes"]), 3)
+        self.assertEqual(len(atlas["nodes"]), 5)
         # Check node fields
         for node in atlas["nodes"]:
             self.assertIn("id", node)
@@ -67,13 +66,13 @@ class TestSummarizationUtils(unittest.TestCase):
 
     def test_get_clusters_and_labels(self):
         meta_with_cluster = [
-            {"filename": "a.py", "dirpath": "src", "distance_to_centroid": 0.1},
-            {"filename": "b.py", "dirpath": "src", "distance_to_centroid": 0.2}
+            {"filename": f"{chr(97+i)}.py", "dirpath": "src", "distance_to_centroid": 0.1*i}
+            for i in range(5)
         ]
-        clusters = {0: {"member_indices": [0, 1]}}
-        labels = summarization_utils.get_clusters_and_labels(meta_with_cluster, clusters, n_labels=2)
+        clusters = {0: {"member_indices": list(range(5))}}
+        labels = summarization_utils.get_clusters_and_labels(meta_with_cluster, clusters, n_labels=5, n_min=1)
         self.assertIn(0, labels)
-        self.assertEqual(len(labels[0]["representatives"]), 2)
+        self.assertEqual(len(labels[0]["representatives"]), 5)
 
     def test_build_cluster_prompt(self):
         cluster_labels = {

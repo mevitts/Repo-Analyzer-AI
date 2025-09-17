@@ -4,6 +4,7 @@ from src.backend.services.embedding_service import process_repo
 from src.backend.utils.embed_utils import JinaEmbedder
 from src.backend.utils.file_utils import list_files, get_file_contents
 from src.backend.utils import summarization_utils
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -11,11 +12,9 @@ router = APIRouter()
 
 @router.post("/load_repo")
 async def load_repo(request: Request, repo_id: str, owner: str):
-    """
-    Endpoint to load a repository before processing its contents.
-    """
     logger.info(f"Loading repository {repo_id} for owner {owner}")
     try:
+        # REMOVE Qdrant collection existence check and always fetch files
         file_list_resp = list_files(repo=repo_id, owner=owner)
         logger.info(f"File list response: Completed")
         if file_list_resp["status"] != "success":
@@ -37,30 +36,55 @@ async def load_repo(request: Request, repo_id: str, owner: str):
 
         request.app.state.file_contents = all_content
         request.app.state.repo_id = repo_id
-        
+
+        logger.info(f"[load_repo] file_contents keys: {list(all_content.keys())[:5]}... total: {len(all_content)}")
+        logger.info(f"[load_repo] request.app.state.file_contents keys: {list(request.app.state.file_contents.keys())[:5]}... total: {len(request.app.state.file_contents)}")
+
         logger.info(f"Successfully loaded {len(all_content)} files, {len(failed_files)} failed")
         return {
             "status": "success", 
             "files_loaded": len(all_content),
             "files_failed": len(failed_files),
-            "failed_files": failed_files
+            "failed_files": failed_files,
+            "file_contents": all_content
         }
     except Exception as e:
         logger.exception(f"Exception during repository loading: {e}")
         return {"status": "error", "message": str(e)}
 
-@router.post("/ingest")
-async def ingest_repo(request: Request):
-    logger.info("Starting repository ingestion")
-    
-    file_contents = getattr(request.app.state, "file_contents", None)
-    repo_id = getattr(request.app.state, "repo_id", None)
 
-    if not file_contents or not repo_id:
-        return {"status": "error", "message": "No repo loaded. Please call /load_repo first."}
-    
+from fastapi import Body
+
+@router.post("/ingest")
+async def ingest_repo(
+    request: Request,
+    repo_id: str = Body(...),
+    file_contents: dict = Body(None)
+):
+    client = request.app.state.qdrant
+    collection_name = f"repo_{repo_id}"
+    if collection_name in [c.name for c in client.get_collections().collections]:
+        client.delete_collection(collection_name=collection_name)
+    # Now proceed with ingest
+    logger.info(f"Starting repository ingestion for repo_id={repo_id}")
+
+    # Prefer file_contents from body, fallback to app.state
+    if file_contents is None:
+        file_contents = getattr(request.app.state, "file_contents", None)
+    state_repo_id = getattr(request.app.state, "repo_id", None)
+
+    # Debug: Log file_contents keys and length before ingest
+    if file_contents is not None:
+        logger.info(f"[ingest] file_contents keys: {list(file_contents.keys())[:5]}... total: {len(file_contents)}")
+    else:
+        logger.warning("[ingest] file_contents is None in app state")
+
+    if not file_contents or (state_repo_id and state_repo_id != repo_id):
+        logger.warning("No file_contents provided or repo_id mismatch. Ingest expects file_contents in body or /load_repo to be called first in this session.")
+        return {"status": "error", "message": "No repo loaded. Please call /load_repo first or provide file_contents."}
+
     logger.info(f"Ingesting {len(file_contents)} files for repo {repo_id}")
-    
+
     try:
         embedder = request.app.state.jina_embedder
         result = process_repo(file_contents, repo_id, embedder)
@@ -132,52 +156,103 @@ async def summarize_repo(
     reps_per_cluster: int = 3, 
     max_snippets: int = 5
 ):
-    """Summarize the repository and its contents"""
+    """
+    Summarize the repository and its contents.
+    Improved logging and error handling for easier debugging.
+    """
+    logger.info(f"[summarize_repo] Called for repo_id={repo_id}")
 
-    logger.info(f"Starting summarization for repo {repo_id}")
     client = request.app.state.qdrant
     collection_name = f"repo_{repo_id}"
-    # Now use client and collection_name for all Qdrant operations
-    
+    gemini_key = os.getenv("GOOGLE_API_KEY", "")
+    if not gemini_key:
+        logger.warning("[summarize_repo] GOOGLE_API_KEY not set. Summarization may fail if required.")
+        raise RuntimeError("GOOGLE_API_KEY environment variable is not set.")
+
+    # Defensive initialization
+    repo_metrics = {}
+    repo_summary = {}
+    cluster_summaries = []
+
     if not hasattr(request.app.state, "atlas_cache"):
         request.app.state.atlas_cache = {}
 
     try:
-        points = client.scroll(collection_name=collection_name, limit=max_points).points
+        logger.info(f"[summarize_repo] Attempting to fetch points from Qdrant collection: {collection_name}")
+        # Check if collection exists
+        collections = client.get_collections()
+        collection_names = [c.name for c in getattr(collections, "collections", [])]
+        if collection_name not in collection_names:
+            logger.error(f"[summarize_repo] Qdrant collection '{collection_name}' does not exist. Available: {collection_names}")
+            raise RuntimeError(f"Qdrant collection '{collection_name}' does not exist. Did ingestion succeed?")
+
+        points, _ = client.scroll(collection_name=collection_name, limit=max_points, with_vectors=True)
+        logger.info(f"[summarize_repo] Retrieved {len(points)} points from Qdrant.")
+        for i, pt in enumerate(points[:5]):
+            logger.info(f"[summarize_repo] Point {i} vector type: {type(getattr(pt, 'vector', None))} length: {len(getattr(pt, 'vector', []) or [])}")
+
+        if not points:
+            logger.error(f"[summarize_repo] No points found in collection '{collection_name}'.")
+            raise RuntimeError(f"No points found in Qdrant collection '{collection_name}'.")
+
         content_hash = summarization_utils.compute_content_hash(points)
         cache_key = (repo_id, content_hash)
-        
+
         if not hasattr(request.app.state, "summarization_cache"):
             cache = request.app.state.summarization_cache = {}
+        else:
+            cache = request.app.state.summarization_cache
 
         if cache_key in cache:
-            logger.info(f"Returning cached summary for {repo_id} version {content_hash}")
+            logger.info(f"[summarize_repo] Returning cached summary for {repo_id} version {content_hash}")
             return cache[cache_key]
-        
-        logger.info(f"Fetched {len(points)} points from Qdrant for summarization")
-        
+
+        logger.info(f"[summarize_repo] Downsampling points for clustering...")
         sampled = summarization_utils.stratified_downsample(points, n_max=max_points)
+        logger.info(f"[summarize_repo] Sampled {len(sampled)} points.")
+
         X, meta = summarization_utils.preprocess_points(sampled)
-        labels, centroids = summarization_utils.run_kmeans(X, n_clusters=cluster_k)
-        meta_with_cluster, clusters = summarization_utils.assign_clusters_and_scores(X, meta, labels, centroids)
-        cluster_labels = summarization_utils.get_clusters_and_labels(meta_with_cluster, clusters, n_labels=reps_per_cluster)
+        logger.info(f"[summarize_repo] Preprocessed points. X shape: {X.shape}, meta count: {len(meta)}")
         
+        if X.size == 0 or len(meta) == 0:
+            logger.error(f"[summarize_repo] No valid points after preprocessing. Aborting summarization.")
+            return {
+                "repo_id": repo_id,
+                "metrics": repo_metrics,
+                "repo_summary": repo_summary,
+                "clusters": cluster_summaries,
+                "error": "No valid points for summarization after preprocessing."
+            }
+            
+        labels, centroids = summarization_utils.run_kmeans(X, n_clusters=cluster_k)
+        logger.info(f"[summarize_repo] Ran KMeans clustering. Labels: {set(labels)}, Centroids shape: {centroids.shape}")
+
+        meta_with_cluster, clusters = summarization_utils.assign_clusters_and_scores(X, meta, labels, centroids)
+        logger.info(f"[summarize_repo] Assigned clusters and scores.")
+
+        cluster_labels = summarization_utils.get_clusters_and_labels(meta_with_cluster, clusters, n_labels=reps_per_cluster)
+        logger.info(f"[summarize_repo] Built cluster labels.")
+
         cluster_summaries = []
         for cluster_id, info in cluster_labels.items():
-            summary = summarization_utils.summarize_cluster(info, repo_id=repo_id)
+            logger.info(f"[summarize_repo] Summarizing cluster {cluster_id}...")
+            summary = summarization_utils.summarize_cluster(info, repo_id=repo_id, api_key=gemini_key)
             cluster_summaries.append(summary)
-        
+
         repo_metrics = {
             "points": len(points),
             "clusters": len(clusters),
             "files": len({m["filepath"] for m in meta}),
             "top_dirs": list({m["dirpath"] for m in meta})[:5]
         }
+        logger.info(f"[summarize_repo] Repo metrics: {repo_metrics}")
+
         repo_summary = summarization_utils.summarize_repo(cluster_summaries, repo_metrics=repo_metrics)
-        
+        logger.info(f"[summarize_repo] Repo summary generated.")
+
         summarization_utils.clusters_to_qdrant(client, collection_name=collection_name, meta_with_cluster=meta_with_cluster)
-        logger.info(f"Summarization completed for repo {repo_id}")
-        
+        logger.info(f"[summarize_repo] Persisted cluster IDs to Qdrant.")
+
         request.app.state.atlas_cache[repo_id] = meta_with_cluster
 
         cache[cache_key] = {
@@ -186,24 +261,65 @@ async def summarize_repo(
             "repo_summary": repo_summary,
             "clusters": cluster_summaries
         }
+        logger.info(f"[summarize_repo] Caching and returning summary for {repo_id}.")
         return cache[cache_key]
-        
+
     except Exception as e:
-        logger.error(f"Summarization failed: {str(e)}")
-        
-    return {
+        logger.error(f"[summarize_repo] Exception: {type(e).__name__}: {e}", exc_info=True)
+        return {
             "repo_id": repo_id,
             "metrics": repo_metrics,
             "repo_summary": repo_summary,
-            "clusters": cluster_summaries
+            "clusters": cluster_summaries,
+            "error": f"{type(e).__name__}: {e}"
         }
-    
+
+@router.post("/atlas_cluster")
+async def atlas_cluster(
+    request: Request,
+    repo_id: str,
+    max_points: int = 1000,
+    cluster_k: int = 10
+):
+    """
+    Cluster repo points and cache for Atlas, without running LLM summarization.
+    """
+    logger.info(f"[atlas_cluster] Clustering for repo {repo_id}")
+    client = request.app.state.qdrant
+    collection_name = f"repo_{repo_id}"
+
+    collections = client.get_collections()
+    collection_names = [c.name for c in getattr(collections, "collections", [])]
+    if collection_name not in collection_names:
+        logger.error(f"[atlas_cluster] Qdrant collection '{collection_name}' does not exist.")
+        return {"status": "error", "message": f"Qdrant collection '{collection_name}' does not exist."}
+
+    points, _ = client.scroll(collection_name=collection_name, limit=max_points, with_vectors=True)
+    if not points:
+        logger.error(f"[atlas_cluster] No points found in collection '{collection_name}'.")
+        return {"status": "error", "message": f"No points found in Qdrant collection '{collection_name}'."}
+
+    X, meta = summarization_utils.preprocess_points(points)
+    if X.size == 0 or len(meta) == 0:
+        logger.error(f"[atlas_cluster] No valid points after preprocessing.")
+        return {"status": "error", "message": "No valid points for clustering."}
+
+    labels, centroids = summarization_utils.run_kmeans(X, n_clusters=cluster_k)
+    meta_with_cluster, clusters = summarization_utils.assign_clusters_and_scores(X, meta, labels, centroids)
+
+    if not hasattr(request.app.state, "atlas_cache"):
+        request.app.state.atlas_cache = {}
+    request.app.state.atlas_cache[repo_id] = meta_with_cluster
+
+    logger.info(f"[atlas_cluster] Cached cluster assignments for repo {repo_id}")
+    return {"status": "success", "message": "Cluster assignments cached for Atlas."}
+
 
 @router.post("/atlas_pack")
 async def atlas_pack(
     request: Request,
     repo_id: str,
-    similarity_threshold: float = 0.8
+    similarity_threshold: float = 0.75
 ):
     """Build and return the atlas pack for a repo"""
     logger.info(f"Building atlas pack for repo {repo_id}")

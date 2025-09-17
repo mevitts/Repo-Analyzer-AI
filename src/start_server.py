@@ -101,7 +101,7 @@ def start_qdrant():
         return False
 
 
-def start_server(host="localhost", port=8000, reload=True):
+def start_server(host="localhost", port=8888, reload=True):
     """Start the FastAPI server"""
     logger.info(f"Starting Repository Analyzer API server on {host}:{port}")
     
@@ -109,7 +109,8 @@ def start_server(host="localhost", port=8000, reload=True):
         sys.executable, "-m", "uvicorn",
         "src.backend.api.main:app",
         "--host", host,
-        "--port", str(port)
+        "--port", str(port),
+        "--workers", "1"
     ]
     
     if reload:

@@ -13,6 +13,11 @@ from jsonschema import ValidationError
 import json
 import re
 from umap import UMAP
+import logging
+from google import genai
+from google.genai import types
+
+logger = logging.getLogger(__name__)
 
 cluster_schema = {"cluster_id": "<id>", 
                   "title": "<short human label>", 
@@ -61,21 +66,24 @@ def gemini_summarize(prompt: str, api_key: Optional[str] = None, model: str = "m
     api_key = api_key or os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise ValueError("Gemini API key not provided.")
-    url = f"https://generativelanguage.googleapis.com/v1beta/{model}:generateContent?key={api_key}"
-    headers = {"Content-Type": "application/json"}
-    data = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 512}
-    }
-    response = requests.post(url, headers=headers, json=data)
-    response.raise_for_status()
-    result = response.json()
-    
+    client = genai.Client(api_key=api_key)
+    try:
+        response = client.models.generate_content(
+            model='gemini-2.0-flash-001', 
+            contents=prompt,
+            config=types.GenerateContentConfig(temperature=0.2,
+                    max_output_tokens=512,),
+        )
+        if response.text:
+            return response.text
+    except Exception as e:
+        raise RuntimeError(f"Gemini API call failed: {e}")
+    '''
     try:
         return result["candidates"][0]["content"]["parts"][0]["text"]
     except Exception:
         return str(result)
-
+'''
 #groups points by filepath
 def stratified_downsample(points: List[Dict[str, Any]], n_max: int) -> List[Dict[str, Any]]:
     """
@@ -112,47 +120,71 @@ def preprocess_points(points: List[Dict[str, Any]]):
     Given a list of Qdrant points, extract and L2-normalize vectors, and build meta[] with filepath, dirpath, filename.
     Returns: X (np.ndarray), meta (List[Dict])
     """
+    logger = logging.getLogger(__name__)
     X = []
-    
     meta = []
-    for pt in points:
-        vector = pt.get("vector")
-        if vector is None:
+    logger.info(f"[preprocess_points] Received {len(points)} points")
+    for idx, pt in enumerate(points):
+        if isinstance(pt, dict):
+            vector = pt.get("vector")
+            payload = pt.get("payload", {})
+            point_id = pt.get("id")
+        elif hasattr(pt, "vector") and hasattr(pt, "payload"):
+            vector = pt.vector
+            payload = pt.payload
+            point_id = getattr(pt, "id", None)
+        else:
+            logger.warning(f"[preprocess_points] Skipping point {idx}: unrecognized type {type(pt)}")
+            continue
+
+        if vector is None or not isinstance(vector, (list, tuple, np.ndarray)) or len(vector) == 0:
+            logger.warning(f"[preprocess_points] Skipping point {idx}: missing or invalid vector")
             continue
         X.append(vector)
-        
-        payload = pt.get("payload", {})
         filepath = payload.get("filepath", "")
-        # dirpath: top-1 or top-2 directory parts
         parts = filepath.split("/")
         dirpath = "/".join(parts[:2]) if len(parts) > 1 else parts[0]
         filename = os.path.basename(filepath)
         meta.append({
-            "id": pt.get("id"),
+            "id": point_id,
             "filepath": filepath,
             "dirpath": dirpath,
             "filename": filename,
-            "payload": payload
+            "payload": payload,
+            "vector": vector 
         })
     if not X:
-        return np.array([]), []
+        # Return a 2D empty array with shape (0, 0)
+        return np.empty((0, 0)), []
     X = np.array(X)
+    if X.ndim == 1:
+        X = X.reshape(-1, 1)
     # L2 normalize
     norms = np.linalg.norm(X, axis=1, keepdims=True)
     X = X / np.clip(norms, 1e-8, None)
     return X, meta
+
 
 def run_kmeans(X: np.ndarray, n_clusters: int = 10, random_state: int = 42) -> Tuple[np.ndarray, np.ndarray]:
     """
     Runs KMeans clustering on X.
     Returns: (labels, centroids)
     """
+    # Guard: if X is empty, return empty arrays
+    if X.size == 0 or X.shape[0] == 0:
+        return np.array([]), np.array([])
     kmeans = KMeans(n_clusters=n_clusters, random_state=random_state, n_init="auto")
     labels = kmeans.fit_predict(X)
     centroids = kmeans.cluster_centers_
     return labels, centroids
 
-def assign_clusters_and_scores(X: np.ndarray, meta: List[Dict[str, Any]], labels: np.ndarray, centroids: np.ndarray):
+
+def assign_clusters_and_scores(
+    X: np.ndarray,
+    meta: List[Dict[str, Any]],
+    labels: np.ndarray,
+    centroids: np.ndarray
+) -> Tuple[List[Dict[str, Any]], Dict[int, Dict[str, Any]]]:
     """
     Assigns cluster_id to each meta entry and computes distances to centroid.
     Returns:
@@ -160,23 +192,27 @@ def assign_clusters_and_scores(X: np.ndarray, meta: List[Dict[str, Any]], labels
         clusters: dict of cluster_id -> {centroid, member_indices, member_ids}
     """
     if X.size == 0 or labels.size == 0 or centroids.size == 0:
-        return []
-    
+        return [], {}
+
+    # centroid can be None or a numpy array
+    clusters: Dict[int, Dict[str, Any]] = defaultdict(
+        lambda: {"centroid": None, "member_indices": [], "member_ids": []}
+    )
     meta_with_cluster = []
-    clusters = defaultdict(lambda: {"centroid": None, "member_indices": [], "member_ids": []})
-    
+
     for i, (m, label) in enumerate(zip(meta, labels)):
         m = dict(m)  # make a copy
         m["cluster_id"] = int(label)
         dist = np.linalg.norm(X[i] - centroids[label])
         m["distance_to_centroid"] = float(dist)
         meta_with_cluster.append(m)
-        
+
         clusters[label]["member_indices"].append(i)
         clusters[label]["member_ids"].append(m["id"])
         clusters[label]["centroid"] = centroids[label]
-        
+
     return meta_with_cluster, clusters
+
 
 def get_clusters_and_labels(meta_with_cluster: List[Dict[str, Any]], clusters: Dict[int, Dict[str, Any]], n_labels: Optional[int] = None, n_min: int = 3) -> Dict[int, Dict[str, Any]]:
     """
@@ -184,7 +220,6 @@ def get_clusters_and_labels(meta_with_cluster: List[Dict[str, Any]], clusters: D
     n_labels: max number of representatives per cluster (token guard). Default: 6.
     Returns: dict of cluster_id -> {representatives, label, top_dirs, top_files}
     """
-    
     misc_members = []
     cluster_labels = {}
     for cluster_id, info in clusters.items():
@@ -249,6 +284,7 @@ def build_cluster_prompt(cluster_labels: dict, repo_id: str, max_snippet_chars: 
         )
     return prompt
 
+
 def build_repo_prompt(cluster_jsons: List[dict], repo_metrics: dict) -> str:
     """
     Build a prompt for repo-level summary using all cluster summaries and repo metrics.
@@ -277,43 +313,77 @@ def build_repo_prompt(cluster_jsons: List[dict], repo_metrics: dict) -> str:
     
     return prompt
 
+
 def summarize_cluster(cluster_info: dict, repo_id: str, api_key: Optional[str] = None, max_retries: int = 2) -> dict:
     """
     Summarize a cluster using LLM, with sanity check: if summary mentions files not in key_files, re-run with stricter prompt.
     """
     prompt = build_cluster_prompt(cluster_info, repo_id)
-    
+    last_summary = None
+    last_error = None
+    def clean_json_block(s):
+        # Remove code block markers and leading/trailing whitespace
+        s = s.strip()
+        # Remove triple backtick code block (with or without 'json')
+        s = re.sub(r'^```(?:json)?', '', s, flags=re.IGNORECASE).strip()
+        s = re.sub(r'```$', '', s).strip()
+        # If single quotes are used, replace with double quotes (be careful: only if it looks like a dict)
+        if s.startswith('{') and "'" in s and '"' not in s:
+            s = s.replace("'", '"')
+        return s
+
     for attempt in range(max_retries):
-        summary_str = gemini_summarize(prompt, api_key=api_key)
-        summary = json.loads(summary_str)
-        jsonschema.validate(instance=summary, schema=cluster_schema)
+        try:
+            summary_str = gemini_summarize(prompt, api_key=api_key)
+            logger.info(f"[summarize_cluster] Gemini raw output (attempt {attempt+1}): {summary_str}")
+            cleaned = clean_json_block(summary_str)
+            summary = json.loads(cleaned)
+            jsonschema.validate(instance=summary, schema=cluster_schema)
+            # check for mentioned files not in key_files
+            key_files = set(cluster_info.get("key_files", []))
+            file_pattern = r'[\w\-/]+\.py'
+            found_files = set(re.findall(file_pattern, summary.get("summary", "")))
+            extra_files = found_files - key_files
+            if extra_files:
+                logger.warning(f"Sanity check failed: summary mentions files not in key_files: {extra_files}")
+                for file in extra_files:
+                    summary["summary"] = summary["summary"].replace(file, "")
+                continue
+            return summary
+        except (json.JSONDecodeError, ValidationError) as e:
+            logger.warning(f"[summarize_cluster] Attempt {attempt+1} failed to parse/validate Gemini output: {e}")
+            last_summary = summary_str if 'summary_str' in locals() else None
+            last_error = str(e)
+        except Exception as e:
+            logger.error(f"[summarize_cluster] Unexpected error: {e}")
+            last_summary = summary_str if 'summary_str' in locals() else None
+            last_error = str(e)
+    # Fallback: always return error and raw output for debugging/leniency
+    logger.warning(f"[summarize_cluster] All attempts failed. Returning fallback summary.")
+    return {"error": last_error, "raw_output": last_summary or ""}
 
-        #check for mentioned files not in key_files
-        key_files = set(cluster_info.get("key_files", []))
-        file_pattern = r'[\w\-/]+\.py'
-        found_files = set(re.findall(file_pattern, summary.get("summary", "")))
-        extra_files = found_files - key_files
-        if extra_files:
-            print(f"Sanity check failed: summary mentions files not in key_files: {extra_files}")
-            for file in extra_files:
-                summary["summary"] = summary["summary"].replace(file, "")
-            continue
-
-        return summary
-    # If all attempts fail, return summmary and log warning (console for now)
-    print(f"Fallback: returning summary with extra files removed. Files: {extra_files}")
-    return summary
 
 def summarize_repo(cluster_jsons: List[dict], repo_metrics: dict, api_key: Optional[str] = None) -> dict:
     prompt = build_repo_prompt(cluster_jsons, repo_metrics)
-    summary = gemini_summarize(prompt, api_key=api_key)
-    try:
-        convert = jsonschema.validate(instance=summary, schema=repo_schema)
-    except ValidationError as e:
-        print(f"Validation Error: {e.message}")
-        print(f"Validation Error: {e.message}")
+    def clean_json_block(s):
+        s = s.strip()
+        s = re.sub(r'^```(?:json)?', '', s, flags=re.IGNORECASE).strip()
+        s = re.sub(r'```$', '', s).strip()
+        if s.startswith('{') and "'" in s and '"' not in s:
+            s = s.replace("'", '"')
+        return s
 
-    return json.loads(summary) if convert else {}
+    summary_str = gemini_summarize(prompt, api_key=api_key)
+    logger.info(f"[summarize_repo] Gemini raw output: {summary_str}")
+    cleaned = clean_json_block(summary_str)
+    try:
+        summary = json.loads(cleaned)
+        jsonschema.validate(instance=summary, schema=repo_schema)
+        return summary
+    except (json.JSONDecodeError, ValidationError) as e:
+        logger.warning(f"[summarize_repo] Failed to parse/validate Gemini output: {e}")
+        return {"error": str(e), "raw_output": summary_str}
+
 
 def clusters_to_qdrant(qdrant_client, collection_name: str, meta_with_cluster: list):
     """
@@ -329,77 +399,71 @@ def clusters_to_qdrant(qdrant_client, collection_name: str, meta_with_cluster: l
                 points=[point_id]
             )
 
-def build_atlas_pack(meta_with_cluster: list, repo_id: str, similarity_threshold: float = 0.8, k_sim: int = 5) -> dict:
-    """
-    Builds an atlas pack: nodes (points) and edges (semantic relationships).
-    Nodes represent code points: id, label, filepath, cluster_id, pos, score
-    Edges represent semantic similarity above a set threshold: semantic kNN (k_sim) using cosine similarity
-    """
+
+def build_atlas_pack(
+    meta_with_cluster: list,
+    repo_id: str,
+    similarity_threshold: float = 0.85,
+    k_sim: int = 3,
+    cluster_edge: bool = True
+) -> dict:
     nodes = []
-    vectors = []
+    seen = set()
     ids = []
-    #node building (id and distance score) and vector collection
-    for meta in meta_with_cluster:
+    vectors = []
+    filepaths = []
+    for i, meta in enumerate(meta_with_cluster):
+        dedup_key = (meta.get("filepath"), meta.get("payload", {}).get("start_line_no"), meta.get("payload", {}).get("end_line_no"))
+        if dedup_key in seen:
+            continue
+        seen.add(dedup_key)
+        excerpt = meta.get("payload", {}).get("excerpt", "")
         node = {
             "id": meta["id"],
-            "label": meta["filename"],
-            "filepath": meta["filepath"],
-            "cluster_id": meta["cluster_id"],
-            "score": meta.get("distance_to_centroid", 0.0)
+            "label": meta.get("filename", meta["id"]),
+            "filepath": meta.get("filepath", ""),
+            "cluster_id": meta.get("cluster_id", ""),
+            "score": meta.get("distance_to_centroid", 0.0),
+            "excerpt": excerpt,
         }
         nodes.append(node)
-        vec = meta.get("vector")
-        if vec is not None:
-            vectors.append(vec)
-            ids.append(meta["id"])
-        else:
-            vectors.append(np.zeros(10))
-            ids.append(meta["id"])
+        ids.append(meta["id"])
+        vectors.append(meta["vector"])
+        filepaths.append(meta.get("filepath", ""))
 
-    if len(vectors) > 0:
-        reducer = UMAP(n_components=2, random_state=42)
+    edge_set = set()
+    if vectors:
         vecs_np = np.array(vectors)
-        pos_2d = reducer.fit_transform(vecs_np)
-        
-        if isinstance(pos_2d, np.ndarray) and pos_2d.ndim == 2 and pos_2d.shape[1] == 2:
-            for i, node in enumerate(nodes):
-                node["pos"] = {"x": float(pos_2d[i, 0]), "y": float(pos_2d[i, 1])}
-        else:
-            for node in nodes:
-                node["pos"] = {"x": 0.0, "y": 0.0}
-
-    edges = set()
-    vecs_np = np.array(vectors)
-    norms = np.linalg.norm(vecs_np, axis=1)
-
-    for i, vec_a in enumerate(vecs_np):
-        similarities = np.dot(vecs_np, vec_a) / (norms * np.linalg.norm(vec_a) + 1e-8)
-
-        #get top k indices
-        top_k_idx = np.argpartition(-similarities, k_sim+1)[:k_sim+1]
-        candidates = [(j, similarities[j]) for j in top_k_idx if j != i and similarities[j] >= similarity_threshold]
-
-        #sort and take top k
-        top_k = sorted(candidates, key=lambda x: -x[1])[:k_sim]
-
-        for j, similarity in top_k:
-            edge = (min(ids[i], ids[j]), max(ids[i], ids[j]), float(similarity))
-            edges.add(edge)
+        norms = np.linalg.norm(vecs_np, axis=1)
+        for i, vec_a in enumerate(vecs_np):
+            similarities = np.dot(vecs_np, vec_a) / (norms * np.linalg.norm(vec_a) + 1e-8)
+            top_k_idx = np.argpartition(-similarities, k_sim+1)[:k_sim+1]
+            for j in top_k_idx:
+                if j != i and similarities[j] >= similarity_threshold:
+                    edge = (min(ids[i], ids[j]), max(ids[i], ids[j]), float(similarities[j]))
+                    edge_set.add(edge)
+    # File edges are disabled by default
 
     edge_list = [
         {"source": src, "target": tgt, "type": "semantic", "weight": weight}
-        for src, tgt, weight in edges
+        for src, tgt, weight in edge_set
     ]
-
     return {"nodes": nodes, "edges": edge_list}
 
-def compute_content_hash(points: List[Dict[str, Any]]) -> str:
+def compute_content_hash(points: List) -> str:
     """
     Computes a SHA256 hash of the concatenated filepaths and optionally file contents/excerpts.
-    This is used to cache cluster results by repo version/content.
+    Handles both dicts and Qdrant Record objects.
     """
+    def get_payload(pt):
+        if isinstance(pt, dict):
+            return pt.get("payload", {})
+        elif hasattr(pt, "payload"):
+            return pt.payload
+        return {}
+
     hash_input = "".join(
-        str(pt.get("payload", {}).get("filepath", "")) + str(pt.get("payload", {}).get("excerpt", ""))
+        str(get_payload(pt).get("filepath", "")) + str(get_payload(pt).get("excerpt", ""))
         for pt in points
     )
     return hashlib.sha256(hash_input.encode("utf-8")).hexdigest()
