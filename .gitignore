@@ -28,3 +28,8 @@ networkX_tut.md
 Summarization_clustering.md
 specifications.md
 requirements.txt
+Dockerfile
+app.yaml
+config.yaml
+Dockerfile
+frontend_integration.md
