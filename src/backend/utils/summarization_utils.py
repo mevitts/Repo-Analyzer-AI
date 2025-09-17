@@ -403,46 +403,76 @@ def clusters_to_qdrant(qdrant_client, collection_name: str, meta_with_cluster: l
 def build_atlas_pack(
     meta_with_cluster: list,
     repo_id: str,
-    similarity_threshold: float = 0.85,
+    similarity_threshold: float = 0.8,
     k_sim: int = 3,
-    cluster_edge: bool = True
+    cluster_edge: bool = True,
+    file_edge: bool = False
 ) -> dict:
+    # Decide if input is file-level or chunk-level by checking for 'chunk_count' and 'vectors'
+    is_file_level = (
+        meta_with_cluster
+        and isinstance(meta_with_cluster[0], dict)
+        and "chunk_count" in meta_with_cluster[0]
+        and "vectors" in meta_with_cluster[0]
+    )
+
     nodes = []
-    seen = set()
     ids = []
     vectors = []
-    filepaths = []
-    for i, meta in enumerate(meta_with_cluster):
-        dedup_key = (meta.get("filepath"), meta.get("payload", {}).get("start_line_no"), meta.get("payload", {}).get("end_line_no"))
-        if dedup_key in seen:
-            continue
-        seen.add(dedup_key)
-        excerpt = meta.get("payload", {}).get("excerpt", "")
-        node = {
-            "id": meta["id"],
-            "label": meta.get("filename", meta["id"]),
-            "filepath": meta.get("filepath", ""),
-            "cluster_id": meta.get("cluster_id", ""),
-            "score": meta.get("distance_to_centroid", 0.0),
-            "excerpt": excerpt,
-        }
-        nodes.append(node)
-        ids.append(meta["id"])
-        vectors.append(meta["vector"])
-        filepaths.append(meta.get("filepath", ""))
+    dirpaths = []
+
+    if is_file_level:
+        # File-level nodes
+        for node in meta_with_cluster:
+            nodes.append({
+                "id": node["id"],
+                "label": node.get("label", os.path.basename(node["filepath"])),
+                "filepath": node["filepath"],
+                "dirpath": node.get("dirpath", ""),
+                "cluster_id": node.get("cluster_id", ""),
+                "loc": node.get("loc", 0),
+                "chunk_count": node.get("chunk_count", 1),
+                "summary": node.get("summary", ""),
+                "vector": node["vector"]
+            })
+            ids.append(node["id"])
+            vectors.append(node["vector"])
+            dirpaths.append(node.get("dirpath", ""))
+    else:
+        # Chunk-level nodes
+        for node in meta_with_cluster:
+            payload = node.get("payload", {})
+            nodes.append({
+                "id": node["id"],
+                "label": f"{os.path.basename(node['filepath'])}:{payload.get('start_line_no', '')}-{payload.get('end_line_no', '')}",
+                "filepath": node["filepath"],
+                "dirpath": node.get("dirpath", ""),
+                "cluster_id": node.get("cluster_id", ""),
+                "start_line_no": payload.get("start_line_no"),
+                "end_line_no": payload.get("end_line_no"),
+                "excerpt": payload.get("excerpt", ""),
+                "vector": node["vector"]
+            })
+            ids.append(node["id"])
+            vectors.append(node["vector"])
+            dirpaths.append(node.get("dirpath", ""))
 
     edge_set = set()
-    if vectors:
+    n_nodes = len(nodes)
+    if vectors and n_nodes > 1:
         vecs_np = np.array(vectors)
         norms = np.linalg.norm(vecs_np, axis=1)
+        safe_k = min(k_sim + 1, n_nodes)
         for i, vec_a in enumerate(vecs_np):
             similarities = np.dot(vecs_np, vec_a) / (norms * np.linalg.norm(vec_a) + 1e-8)
-            top_k_idx = np.argpartition(-similarities, k_sim+1)[:k_sim+1]
+            actual_k = min(safe_k, len(similarities))
+            if actual_k <= 1:
+                continue
+            top_k_idx = np.argpartition(-similarities, actual_k-1)[:actual_k]
             for j in top_k_idx:
                 if j != i and similarities[j] >= similarity_threshold:
                     edge = (min(ids[i], ids[j]), max(ids[i], ids[j]), float(similarities[j]))
                     edge_set.add(edge)
-    # File edges are disabled by default
 
     edge_list = [
         {"source": src, "target": tgt, "type": "semantic", "weight": weight}
@@ -467,3 +497,28 @@ def compute_content_hash(points: List) -> str:
         for pt in points
     )
     return hashlib.sha256(hash_input.encode("utf-8")).hexdigest()
+
+def aggregate_chunks_to_files(meta_with_cluster: list):
+    file_nodes = {}
+    for meta in meta_with_cluster:
+        fp = meta["filepath"]
+        if fp not in file_nodes:
+            file_nodes[fp] = {
+                "id": fp,
+                "label": os.path.basename(fp),
+                "filepath": fp,
+                "dirpath": os.path.dirname(fp),
+                "cluster_id": meta.get("cluster_id"),
+                "loc": 0,
+                "chunk_count": 0,
+                "vectors": [],
+                "excerpts": [],
+                "summary": meta.get("payload", {}).get("summary", ""),
+            }
+        file_nodes[fp]["chunk_count"] += 1
+        file_nodes[fp]["vectors"].append(meta["vector"])
+        file_nodes[fp]["excerpts"].append(meta.get("payload", {}).get("excerpt", ""))
+        file_nodes[fp]["loc"] += meta.get("payload", {}).get("line_count", 0)
+    for node in file_nodes.values():
+        node["vector"] = np.mean(node["vectors"], axis=0).tolist()
+    return list(file_nodes.values())

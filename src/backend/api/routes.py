@@ -176,6 +176,8 @@ async def summarize_repo(
 
     if not hasattr(request.app.state, "atlas_cache"):
         request.app.state.atlas_cache = {}
+    if not hasattr(request.app.state, "file_nodes_cache"):
+        request.app.state.file_nodes_cache = {}
 
     try:
         logger.info(f"[summarize_repo] Attempting to fetch points from Qdrant collection: {collection_name}")
@@ -229,6 +231,7 @@ async def summarize_repo(
 
         meta_with_cluster, clusters = summarization_utils.assign_clusters_and_scores(X, meta, labels, centroids)
         logger.info(f"[summarize_repo] Assigned clusters and scores.")
+        request.app.state.atlas_cache[repo_id] = meta_with_cluster
 
         cluster_labels = summarization_utils.get_clusters_and_labels(meta_with_cluster, clusters, n_labels=reps_per_cluster)
         logger.info(f"[summarize_repo] Built cluster labels.")
@@ -253,7 +256,9 @@ async def summarize_repo(
         summarization_utils.clusters_to_qdrant(client, collection_name=collection_name, meta_with_cluster=meta_with_cluster)
         logger.info(f"[summarize_repo] Persisted cluster IDs to Qdrant.")
 
-        request.app.state.atlas_cache[repo_id] = meta_with_cluster
+        # Build and store file-level nodes
+        file_nodes = summarization_utils.aggregate_chunks_to_files(meta_with_cluster)
+        request.app.state.file_nodes_cache[repo_id] = file_nodes
 
         cache[cache_key] = {
             "repo_id": repo_id,
@@ -319,24 +324,73 @@ async def atlas_cluster(
 async def atlas_pack(
     request: Request,
     repo_id: str,
-    similarity_threshold: float = 0.75
+    similarity_threshold: float = 0.7,
+    k_sim: int = 3
 ):
-    """Build and return the atlas pack for a repo"""
-    logger.info(f"Building atlas pack for repo {repo_id}")
-    
-    client = request.app.state.qdrant
-    collection_name = f"repo_{repo_id}"
-    
+    """Build and return the atlas pack for a repo (file-level nodes)."""
+    logger.info(f"[atlas_pack] Building atlas pack for repo {repo_id}")
+
+    # Check for chunk-level meta
     meta_with_cluster = getattr(request.app.state, "atlas_cache", {}).get(repo_id)
     if not meta_with_cluster:
-        logger.error(f"No cached cluster assignments for repo {repo_id}. Run /summarize_repo first.")
-        return {"status": "error", "message": "No cached cluster assignments. Run /summarize_repo first."}
+        logger.error(f"[atlas_pack] No cached chunk-level meta for repo {repo_id}. Run /summarize_repo first.")
+        return {"status": "error", "message": "No cached chunk-level meta. Run /summarize_repo first."}
+
+    # Check for file-level nodes
+    file_nodes_cache = getattr(request.app.state, "file_nodes_cache", {})
+    file_nodes = file_nodes_cache.get(repo_id)
+    if not file_nodes:
+        logger.warning(f"[atlas_pack] No cached file-level nodes for repo {repo_id}. Rebuilding from chunk meta.")
+        # Rebuild file-level nodes if missing
+        file_nodes = summarization_utils.aggregate_chunks_to_files(meta_with_cluster)
+        if not hasattr(request.app.state, "file_nodes_cache"):
+            request.app.state.file_nodes_cache = {}
+        request.app.state.file_nodes_cache[repo_id] = file_nodes
 
     try:
-        atlas_pack = summarization_utils.build_atlas_pack(meta_with_cluster, repo_id=repo_id, similarity_threshold=similarity_threshold)
-        logger.info(f"Atlas pack built for repo {repo_id}")
+        # Only use file-level nodes for the main Atlas
+        atlas_pack = summarization_utils.build_atlas_pack(
+            file_nodes,
+            repo_id=repo_id,
+            similarity_threshold=similarity_threshold,
+            k_sim=k_sim
+        )
+        logger.info(f"[atlas_pack] Atlas pack built for repo {repo_id} (file-level nodes: {len(file_nodes)})")
         return {"repo_id": repo_id, "atlas_pack": atlas_pack}
+    except Exception as e:
+        logger.error(f"[atlas_pack] Atlas pack build failed: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+@router.post("/file_atlas")
+async def file_atlas(
+    request: Request,
+    repo_id: str = Body(...),
+    filepath: str = Body(...),
+    similarity_threshold: float = Body(0.8),
+    k_sim: int = Body(3)
+):
+    logger = logging.getLogger(__name__)
+    logger.info(f"[file_atlas] Requested for repo_id={repo_id}, filepath={filepath}")
+    meta_with_cluster = getattr(request.app.state, "atlas_cache", {}).get(repo_id)
+    if not meta_with_cluster:
+        logger.warning(f"[file_atlas] No cached chunk-level meta for repo {repo_id}")
+        return {"status": "error", "message": "No cached chunk-level meta. Run /summarize_repo first."}
+    # Only use chunk-level meta for the chunk Atlas
+    file_chunks = [m for m in meta_with_cluster if m["filepath"] == filepath]
+    logger.info(f"[file_atlas] Found {len(file_chunks)} chunks for file {filepath}")
+    if not file_chunks:
+        logger.warning(f"[file_atlas] No chunks found for file {filepath}")
+        return {"status": "error", "message": "No chunks found for this file."}
+    try:
+        atlas_pack = summarization_utils.build_atlas_pack(
+            file_chunks,
+            repo_id=repo_id,
+            similarity_threshold=similarity_threshold,
+            k_sim=k_sim
+        )
+        logger.info(f"[file_atlas] Built chunk-level atlas with {len(atlas_pack['nodes'])} nodes and {len(atlas_pack['edges'])} edges")
+        return {"atlas_pack": atlas_pack}
     
     except Exception as e:
-        logger.error(f"Atlas pack build failed: {str(e)}")
+        logger.error(f"[file_atlas] Failed to build chunk-level atlas: {str(e)}")
         return {"status": "error", "message": str(e)}

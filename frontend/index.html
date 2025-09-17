@@ -55,14 +55,22 @@
             <h1 class="atlas-title">Repository Atlas</h1>
             <div id="atlas-loading-msg"></div>
             <div id="atlas-graph" style="width: 100vw; height: 80vh; min-height: 600px; border: 1px solid var(--border-color); border-radius: 12px;"></div>
-            <div id="atlas-sidebar"></div>
+            <div id="atlas-sidebar" class="atlas-sidebar-overlay"></div>
         </div>
 
         <!-- Search View -->
         <div id="search-container" class="search-container hidden">
              <h3>Semantic Search</h3>
-             <input type="text" id="search-input" placeholder="Search for code logic, e.g., 'user authentication logic'">
+             <div style="display: flex; gap: 8px; align-items: center;">
+                 <input type="text" id="search-input" placeholder="Search for code logic, e.g., 'user authentication logic'">
+                 <button id="search-run-btn" type="button">Search</button>
+             </div>
              <div id="search-results"></div>
+        </div>
+
+        <div id="chunk-atlas-modal" class="modal hidden">
+            <div id="chunk-atlas-graph"></div>
+            <button id="close-chunk-atlas">Close</button>
         </div>
     </div>
 

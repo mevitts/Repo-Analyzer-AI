@@ -19,7 +19,6 @@ export class RepositoryAnalyzerApp {
         const atlasBtn = document.getElementById('atlas-btn');
         const searchBtn = document.getElementById('search-btn');
         const repoUrlInput = document.getElementById('repo-url');
-        const searchInput = document.getElementById('search-input');
 
         // Initial UI state
         this.ui.showInitialState();
@@ -105,13 +104,19 @@ export class RepositoryAnalyzerApp {
                 this.ui.showSearchView();
             });
         }
-
-        // Search input event listener
+        const searchInput = document.getElementById('search-input');
         if (searchInput) {
             searchInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') {
+                    e.preventDefault();
                     this.handleSearch();
                 }
+            });
+        }
+        const searchRunBtn = document.getElementById('search-run-btn');
+        if (searchRunBtn) {
+            searchRunBtn.addEventListener('click', () => {
+                this.handleSearch();
             });
         }
 
@@ -137,7 +142,6 @@ export class RepositoryAnalyzerApp {
         const query = document.getElementById('search-input').value;
         if (!query || !this.repoId) return;
 
-        this.ui.updateThinkingLog(`Searching for "${query}"...`);
         this.ui.showLoading();
 
         try {

@@ -1,5 +1,5 @@
 import { debugLog } from './config.js';
-
+import { CONFIG } from './config.js';
 export class UIService {
     constructor() {
         this.elements = {
@@ -60,6 +60,25 @@ export class UIService {
         this.elements.atlasContainer.classList.add('hidden');
         this.elements.searchContainer.classList.add('hidden');
     }
+
+    displaySearchResults(results) {
+        const resultsContainer = this.elements.searchResults;
+        resultsContainer.innerHTML = '';
+        if (!results || !results.points || results.points.length === 0) {
+            resultsContainer.innerHTML = '<p>No results found.</p>';
+            return;
+        }
+        let htmlContent = '';
+        results.points.forEach(point => {
+            htmlContent += `
+                <div class="search-result-item">
+                    <strong>File:</strong> ${point.payload.filepath} (Score: ${point.score ? point.score.toFixed(4) : 'N/A'})
+                    <pre><code>${point.payload.excerpt || 'No excerpt available.'}</code></pre>
+                </div>
+            `;
+        });
+        resultsContainer.innerHTML = htmlContent;
+}
 
     clearResults() {
     if (this.elements.thinkingLog) this.elements.thinkingLog.innerHTML = '';
@@ -154,47 +173,52 @@ export class UIService {
 
     renderAtlas(atlasPack) {
         this.showAtlasView();
-        const elements = [];
-        const clusterColors = {};
+        const colorMap = {};
         let colorIdx = 0;
-        const palette = [
-            '#00ff88', '#3a6ea5', '#c1440e', '#c2b280', '#e2d9c3', '#f5ecd7', '#c2b280', '#c1440e'
-        ];
-        const edgeSet = new Set();
+        const palette = ['#00b894', '#0984e3', '#fdcb6e', '#e17055', '#6c5ce7', '#00cec9', '#d35400', '#636e72'];
+        const elements = [];
         if (atlasPack.nodes) {
             for (const node of atlasPack.nodes) {
-                let color = '#00ff88';
-                if (node.cluster_id !== undefined && node.cluster_id !== null) {
-                    if (!clusterColors[node.cluster_id]) {
-                        clusterColors[node.cluster_id] = palette[colorIdx % palette.length];
-                        colorIdx++;
-                    }
-                    color = clusterColors[node.cluster_id];
+                let color = colorMap[node.dirpath];
+                if (!color) {
+                    color = palette[colorIdx % palette.length];
+                    colorMap[node.dirpath] = color;
+                    colorIdx++;
                 }
                 elements.push({
                     data: {
                         id: node.id,
                         label: node.label,
                         filepath: node.filepath,
+                        dirpath: node.dirpath,
                         cluster_id: node.cluster_id,
-                        score: node.score,
-                        excerpt: node.excerpt
+                        loc: node.loc,
+                        chunk_count: node.chunk_count,
+                        vector: node.vector,
                     },
                     classes: `cluster-${node.cluster_id}`,
-                    style: { 'background-color': color }
+                    style: {
+                        'background-color': color,
+                        'width': Math.max(24, Math.sqrt(node.loc || 10) * 2),
+                        'height': Math.max(24, Math.sqrt(node.loc || 10) * 2),
+                        'border-width': node.label === 'main.py' ? 4 : 1,
+                        'border-color': node.label === 'main.py' ? '#e17055' : '#222'
+                    }
                 });
             }
         }
+        // Fix: define edgeSet before using it
+        const edgeSet = new Set();
         if (atlasPack.edges) {
             for (const edge of atlasPack.edges) {
-            const key = [edge.source, edge.target].sort().join('--');
-                    if (!edgeSet.has(key)) {
-                        elements.push({ data: edge });
-                        edgeSet.add(key);
-                    }
+                const key = [edge.source, edge.target].sort().join('--');
+                if (!edgeSet.has(key)) {
+                    elements.push({ data: edge });
+                    edgeSet.add(key);
+                }
+            }
         }
-    }
-    console.log('[Atlas Debug] Nodes:', atlasPack.nodes.length, 'Edges:', atlasPack.edges.length);
+        console.log('[Atlas Debug] Nodes:', atlasPack.nodes.length, 'Edges:', atlasPack.edges.length);
 
         const cy = cytoscape({
             container: document.getElementById('atlas-graph'),
@@ -237,14 +261,81 @@ export class UIService {
 
         cy.on('tap', 'node', (evt) => {
             const nodeData = evt.target.data();
-            console.log('[Atlas Debug] Node clicked:', nodeData);
-            this.elements.atlasSidebar.innerHTML = `
-                <h4>${nodeData.label || nodeData.id}</h4>
-                <p><strong>File:</strong> ${nodeData.filepath || ''}</p>
-                <p><strong>Cluster ID:</strong> ${nodeData.cluster_id || ''}</p>
-                <p><strong>Score (Distance):</strong> ${typeof nodeData.score === 'number' ? nodeData.score.toFixed(4) : ''}</p>
-                <pre style="max-height:300px;overflow:auto;background:#222;color:#eee;padding:8px;border-radius:6px;"><code>${nodeData.excerpt ? nodeData.excerpt.replace(/</g, "&lt;").replace(/>/g, "&gt;") : 'No excerpt available.'}</code></pre>
-            `;
+            let infoHtml = `<h4>${nodeData.label}</h4>
+                <p><strong>File:</strong> ${nodeData.filepath}</p>
+                <p><strong>Cluster ID:</strong> ${nodeData.cluster_id}</p>`;
+
+            // Show chunk-specific info if present
+            if ('start_line_no' in nodeData && 'end_line_no' in nodeData) {
+                infoHtml += `<p><strong>Lines:</strong> ${nodeData.start_line_no}–${nodeData.end_line_no}</p>`;
+            }
+            if ('excerpt' in nodeData && nodeData.excerpt) {
+                infoHtml += `<pre style="max-height:120px;overflow:auto;"><code>${nodeData.excerpt}</code></pre>`;
+            }
+            if (nodeData.vector && Array.isArray(nodeData.vector)) {
+                const norm = Math.sqrt(nodeData.vector.reduce((a, b) => a + b * b, 0));
+                infoHtml += `<p><strong>Vector norm:</strong> ${norm.toFixed(3)}</p>`;
+            }
+            // For file-level nodes, show file-level info
+            if ('loc' in nodeData) {
+                infoHtml += `<p><strong>Lines of Code:</strong> ${nodeData.loc}</p>`;
+            }
+            if ('chunk_count' in nodeData) {
+                infoHtml += `<p><strong>Chunks:</strong> ${nodeData.chunk_count}</p>`;
+            }
+            this.elements.atlasSidebar.innerHTML = infoHtml;
+
+            // Position sidebar near node as before...
+            const pos = evt.target.renderedPosition();
+            const sidebar = this.elements.atlasSidebar;
+            sidebar.style.display = 'block';
+            sidebar.style.position = 'absolute';
+            sidebar.style.left = `${pos.x + 60}px`;
+            sidebar.style.top = `${pos.y + 80}px`;
+            sidebar.style.zIndex = 100;
         });
+
+        cy.on('dblclick', 'node', async (evt) => {
+            const nodeData = evt.target.data();
+            const repoId = nodeData.repo_id || window.app?.repoId || window.currentRepoId;
+            console.log('[Atlas Debug] Double-clicked node:', nodeData, 'repoId:', repoId);
+            if (!nodeData.filepath || !repoId) return;
+            this.elements.atlasSidebar.innerHTML = `<p>Loading file-level atlas...</p>`;
+            try {
+                const response = await fetch(`${CONFIG.API_BASE_URL}/file_atlas`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        repo_id: repoId,
+                        filepath: nodeData.filepath
+                    })
+                });
+                const data = await response.json();
+                console.log('[Atlas Debug] file_atlas response:', data);
+                if (data.atlas_pack && data.atlas_pack.nodes && data.atlas_pack.nodes.length > 0) {
+                    this.showChunkAtlas(data.atlas_pack);
+                } else {
+                    this.elements.atlasSidebar.innerHTML = `<p>No chunk-level atlas available.</p>`;
+                }
+            } catch (err) {
+                console.error('[Atlas Debug] Error loading chunk-level atlas:', err);
+                this.elements.atlasSidebar.innerHTML = `<p>Error loading chunk-level atlas.</p>`;
+            }
+        });
+
+        cy.on('tap', (evt) => {
+            if (evt.target === cy) {
+                this.elements.atlasSidebar.style.display = 'none';
+            }
+        });
+    }
+
+    showChunkAtlas(atlasPack) {
+        const modal = document.getElementById('chunk-atlas-modal');
+        modal.classList.remove('hidden');
+        this.renderAtlas(atlasPack, document.getElementById('chunk-atlas-graph'));
+        document.getElementById('close-chunk-atlas').onclick = () => {
+            modal.classList.add('hidden');
+        };
     }
 }
