@@ -1,8 +1,8 @@
+
 #!/usr/bin/env python3
 """
-Startup script for Repository Analyzer API
-
-This script starts the FastAPI server with proper configuration
+Startup script for Repository Analyzer API.
+Starts the FastAPI server with proper configuration and environment checks.
 """
 
 import os
@@ -21,42 +21,38 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def check_environment():
-    """Check if the environment is properly set up"""
+    """
+    Check if the environment is properly set up for running the API server.
+    Ensures required files, Python version, and environment variables are present.
+    Returns True if all checks pass, False otherwise.
+    """
     logger.info("Checking environment setup...")
-    
     current_dir = Path.cwd()
     expected_files = ["requirements.txt", "src", "main.py"]
-    
-    missing_files = []
-    for file in expected_files:
-        if not (current_dir / file).exists():
-            missing_files.append(file)
-    
+    missing_files = [file for file in expected_files if not (current_dir / file).exists()]
     if missing_files:
         logger.error(f"Missing required files/directories: {missing_files}")
         logger.error("Make sure you're running this from the project root directory")
         return False
-    
     python_version = sys.version_info
     if python_version.major < 3 or (python_version.major == 3 and python_version.minor < 8):
         logger.error(f"Python 3.8+ is required. Current version: {python_version.major}.{python_version.minor}")
         return False
-    
     github_token = os.getenv("GITHUB_TOKEN")
     if not github_token:
         logger.warning("GITHUB_TOKEN not set. Repository loading may fail.")
         logger.info("Set it with: export GITHUB_TOKEN=your_token_here")
-    
     jina_api_key = os.getenv("JINA_API_KEY")
     if not jina_api_key:
         logger.warning("JINA_API_KEY not set. You'll need to update the code with your API key.")
         logger.info("Set it with: export JINA_API_KEY=your_api_key_here")
-    
     return True
 
-
 def check_dependencies():
-    """Check if required dependencies are installed"""
+    """
+    Check if required dependencies are installed (e.g., via pip freeze or import checks).
+    Logs missing dependencies if any.
+    """
     logger.info("Checking dependencies...")
     
     required_packages = [

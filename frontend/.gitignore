@@ -25,3 +25,8 @@ node_modules/
 .yarn-integrity
 .env
 .dataconnect
+Dockerfile
+docker-compose.yml
+docker-compose.*.yml
+app.yaml
+config.yaml

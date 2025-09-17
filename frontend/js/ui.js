@@ -1,7 +1,12 @@
 import { debugLog } from './config.js';
 import { CONFIG } from './config.js';
+/**
+ * UIService manages all UI state transitions, rendering, and event handling for the Repo Analyzer frontend.
+ * It provides methods to show/hide views, display results, handle errors, and render the Atlas graph.
+ */
 export class UIService {
     constructor() {
+        // Cache references to all relevant DOM elements
         this.elements = {
             form: document.getElementById('analyze-form'),
             repoUrlInput: document.getElementById('repo-url'),
@@ -23,7 +28,10 @@ export class UIService {
         };
     }
 
-    // UI state management for main flow
+    /**
+     * Show the initial UI state (before repo ingest).
+     */
+
     showInitialState() {
         this.hideAllViews();
         this.elements.ingestBtn.classList.remove('hidden');
@@ -32,6 +40,10 @@ export class UIService {
         this.elements.searchBtn.classList.add('hidden');
     }
 
+
+    /**
+     * Show UI state after repo ingest (enable summary, atlas, and search buttons).
+     */
     showPostIngestState() {
         this.hideAllViews();
         this.elements.ingestBtn.classList.add('hidden');
@@ -40,27 +52,47 @@ export class UIService {
         this.elements.searchBtn.classList.remove('hidden');
     }
 
+
+    /**
+     * Show the summary/results view.
+     */
     showSummaryView() {
         this.hideAllViews();
         this.elements.resultsContainer.classList.remove('hidden');
     }
 
+
+    /**
+     * Show the Atlas graph view.
+     */
     showAtlasView() {
         this.hideAllViews();
         this.elements.atlasContainer.classList.remove('hidden');
     }
 
+
+    /**
+     * Show the search view.
+     */
     showSearchView() {
         this.hideAllViews();
         this.elements.searchContainer.classList.remove('hidden');
     }
 
+
+    /**
+     * Hide all main UI views.
+     */
     hideAllViews() {
         this.elements.resultsContainer.classList.add('hidden');
         this.elements.atlasContainer.classList.add('hidden');
         this.elements.searchContainer.classList.add('hidden');
     }
 
+    /**
+     * Render search results in the UI.
+     * @param {Object} results - The search results object.
+     */
     displaySearchResults(results) {
         const resultsContainer = this.elements.searchResults;
         resultsContainer.innerHTML = '';
@@ -80,6 +112,9 @@ export class UIService {
         resultsContainer.innerHTML = htmlContent;
 }
 
+    /**
+     * Clear all result and log containers.
+     */
     clearResults() {
     if (this.elements.thinkingLog) this.elements.thinkingLog.innerHTML = '';
     if (this.elements.reportContent) this.elements.reportContent.innerHTML = '';
@@ -88,18 +123,28 @@ export class UIService {
     debugLog('Results cleared');
     }
 
+    /**
+     * Show loading spinner and disable ingest button.
+     */
     showLoading() {
         this.elements.loading.classList.remove('hidden');
         if (this.elements.ingestBtn) this.elements.ingestBtn.disabled = true;
         debugLog('Loading state shown');
     }
 
+    /**
+     * Hide loading spinner and enable ingest button.
+     */
     hideLoading() {
         this.elements.loading.classList.add('hidden');
         if (this.elements.ingestBtn) this.elements.ingestBtn.disabled = false;
         debugLog('Loading state hidden');
     }
 
+    /**
+     * Render markdown report content in the results container.
+     * @param {string} markdownContent - Markdown string to render.
+     */
     displayReport(markdownContent) {
         try {
             const htmlContent = marked.parse(markdownContent);
@@ -112,6 +157,10 @@ export class UIService {
         }
     }
 
+    /**
+     * Render the repo summary in the results container.
+     * @param {Object} repoSummary - The summary object.
+     */
     displaySummary(repoSummary) {
         const { title, overview, sections } = repoSummary;
         let html = `<h2>${title}</h2>`;
@@ -128,6 +177,10 @@ export class UIService {
         this.showViewAtlasButton();
     }
 
+    /**
+     * Display an error message in the UI.
+     * @param {string} message - The error message.
+     */
     showError(message) {
         const existingErrors = document.querySelectorAll('.error');
         existingErrors.forEach(error => error.remove());
@@ -143,6 +196,10 @@ export class UIService {
         debugLog('Error displayed:', message);
     }
 
+    /**
+     * Add a message to the thinking log.
+     * @param {string} message - The log message.
+     */
     addThinkingLogEntry(message) {
         const entry = document.createElement('div');
         entry.className = 'thinking-log-entry';
@@ -152,25 +209,44 @@ export class UIService {
         debugLog('Thinking log entry added:', message);
     }
 
+    /**
+     * Show the thinking log container.
+     */
     showThinkingContainer() {
         this.elements.thinkingContainer.classList.remove('hidden');
         debugLog('Thinking container shown');
     }
 
+    /**
+     * Get the current form data (repo URL).
+     * @returns {Object} - The form data.
+     */
     getFormData() {
         const repoUrl = this.elements.repoUrlInput.value.trim();
         return { repoUrl };
     }
 
+    /**
+     * Set the repo URL input value.
+     * @param {string} url - The repo URL.
+     */
     setFormData(url) {
         this.elements.repoUrlInput.value = url;
     }
 
+    /**
+     * Show the button to view the Atlas graph.
+     */
     showViewAtlasButton() {
         const btn = document.getElementById('view-atlas-btn');
         if (btn) btn.classList.remove('hidden');
     }
 
+
+    /**
+     * Render the Atlas graph using Cytoscape.js and set up node/edge events.
+     * @param {Object} atlasPack - The atlas pack containing nodes and edges.
+     */
     renderAtlas(atlasPack) {
         this.showAtlasView();
         const colorMap = {};
@@ -207,7 +283,6 @@ export class UIService {
                 });
             }
         }
-        // Fix: define edgeSet before using it
         const edgeSet = new Set();
         if (atlasPack.edges) {
             for (const edge of atlasPack.edges) {
@@ -259,6 +334,7 @@ export class UIService {
             autoungrabify: true,
         });
 
+        // Node click: show sidebar with node info (chunk or file-level)
         cy.on('tap', 'node', (evt) => {
             const nodeData = evt.target.data();
             let infoHtml = `<h4>${nodeData.label}</h4>
@@ -285,7 +361,7 @@ export class UIService {
             }
             this.elements.atlasSidebar.innerHTML = infoHtml;
 
-            // Position sidebar near node as before...
+            // Position sidebar near node
             const pos = evt.target.renderedPosition();
             const sidebar = this.elements.atlasSidebar;
             sidebar.style.display = 'block';
@@ -295,6 +371,7 @@ export class UIService {
             sidebar.style.zIndex = 100;
         });
 
+        // Double-click node: load chunk-level atlas for file node
         cy.on('dblclick', 'node', async (evt) => {
             const nodeData = evt.target.data();
             const repoId = nodeData.repo_id || window.app?.repoId || window.currentRepoId;
@@ -323,6 +400,7 @@ export class UIService {
             }
         });
 
+        // Click background: hide sidebar
         cy.on('tap', (evt) => {
             if (evt.target === cy) {
                 this.elements.atlasSidebar.style.display = 'none';
@@ -330,6 +408,10 @@ export class UIService {
         });
     }
 
+    /**
+     * Show the chunk-level Atlas in a modal dialog.
+     * @param {Object} atlasPack - The chunk-level atlas pack.
+     */
     showChunkAtlas(atlasPack) {
         const modal = document.getElementById('chunk-atlas-modal');
         modal.classList.remove('hidden');
